@@ -1,0 +1,200 @@
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Share+Tech+Mono&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-orbitron: "Orbitron", sans-serif;
+  --font-share-tech: "Share Tech Mono", monospace;
+}
+
+html,
+body {
+  min-height: 100vh;
+  background-color: #030a16;
+  color: #00f3ff;
+  font-family: var(--font-share-tech);
+  overflow-x: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* CRT Scanline Overlay */
+.scanlines {
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0) 50%,
+    rgba(0, 243, 255, 0.04) 50%,
+    rgba(0, 243, 255, 0.04)
+  );
+  background-size: 100% 4px;
+}
+
+/* Futuristic Corner Cut Panels */
+.cyber-panel {
+  background: rgba(4, 18, 33, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 243, 255, 0.25);
+  position: relative;
+}
+
+.cyber-panel::before {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  width: 12px;
+  height: 12px;
+  border-top: 2px solid #00f3ff;
+  border-left: 2px solid #00f3ff;
+  pointer-events: none;
+}
+
+.cyber-panel::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 12px;
+  height: 12px;
+  border-bottom: 2px solid #00f3ff;
+  border-right: 2px solid #00f3ff;
+  pointer-events: none;
+}
+
+.cyber-corner-tr {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 12px;
+  height: 12px;
+  border-top: 2px solid #00f3ff;
+  border-right: 2px solid #00f3ff;
+  pointer-events: none;
+}
+
+.cyber-corner-bl {
+  position: absolute;
+  bottom: -2px;
+  left: -2px;
+  width: 12px;
+  height: 12px;
+  border-bottom: 2px solid #00f3ff;
+  border-left: 2px solid #00f3ff;
+  pointer-events: none;
+}
+
+.text-glow {
+  text-shadow:
+    0 0 8px rgba(0, 243, 255, 0.8),
+    0 0 20px rgba(0, 243, 255, 0.4);
+}
+
+.text-glow-red {
+  text-shadow:
+    0 0 8px rgba(255, 0, 85, 0.8),
+    0 0 20px rgba(255, 0, 85, 0.4);
+}
+
+/* Glow hover / focus for input controls */
+input:focus-visible,
+button:focus-visible {
+  outline: 1px dashed rgba(0, 243, 255, 0.6);
+  outline-offset: 2px;
+}
+
+/* Keyframes */
+@keyframes rotateClockwise {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes rotateCounter {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes pulseGlow {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.9;
+    transform: scale(1.03);
+  }
+}
+
+@keyframes scanBeam {
+  0% {
+    top: 0%;
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0.8;
+  }
+}
+
+.animate-spin-slow {
+  animation: rotateClockwise 20s linear infinite;
+}
+
+.animate-spin-reverse {
+  animation: rotateCounter 15s linear infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+
+.animate-scan-laser {
+  animation: scanBeam 2s ease-in-out infinite alternate;
+}
+
+/* Accessibility - reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Custom scrollbar for internal panels */
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(0, 243, 255, 0.05);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(0, 243, 255, 0.3);
+  border-radius: 2px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 243, 255, 0.55);
+}
