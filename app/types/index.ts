@@ -35,6 +35,7 @@ export interface AuthAdapter {
   verifyVoice(audioBlob: Blob): Promise<AuthResult>;
   verifyFingerprint(scanData: string): Promise<AuthResult>;
   enrollBiometrics(userId: string): Promise<AuthResult>;
+  verifyPasskey(email?: string): Promise<AuthResult>;
   getCurrentUser(): Promise<UserProfile | null>;
   onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void;
 }

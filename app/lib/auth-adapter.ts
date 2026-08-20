@@ -1,7 +1,20 @@
 import type { AuthAdapter, AuthResult, UserProfile } from "../types";
+import {
+  startRegistration,
+  startAuthentication,
+} from "@simplewebauthn/browser";
 
 const STORAGE_KEY = "jarvis_auth_user";
 const DEMO_USERS: Record<string, { passkey: string; user: UserProfile }> = {};
+
+export function __resetMockAdapterStateForTests(): void {
+  Object.keys(DEMO_USERS).forEach((k) => delete DEMO_USERS[k]);
+  try {
+    if (typeof window !== "undefined") window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* noop */
+  }
+}
 
 function generateUid(prefix = "OP"): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}-${Date.now().toString(36).slice(-4).toUpperCase()}`;
@@ -205,9 +218,67 @@ export class MockAuthAdapter implements AuthAdapter {
       };
     }
     this.currentUser = { ...this.currentUser, hasBiometrics: true };
+    const key = this.currentUser.email.toLowerCase();
+    if (DEMO_USERS[key]) {
+      DEMO_USERS[key] = {
+        ...DEMO_USERS[key],
+        user: { ...DEMO_USERS[key].user, hasBiometrics: true },
+      };
+    }
     persistUser(this.currentUser);
     this.emit(this.currentUser);
     return { success: true, user: this.currentUser };
+  }
+
+  async verifyPasskey(_email?: string): Promise<AuthResult> {
+    if (typeof window === "undefined" || !window.PublicKeyCredential) {
+      return {
+        success: false,
+        error: "WebAuthn / Passkey authentication is not supported in this environment.",
+        errorCode: "passkey-not-supported",
+      };
+    }
+    try {
+      const email = _email ?? this.currentUser?.email ?? "";
+      const options = await fetch(
+        `${typeof process !== "undefined"
+          ? (process.env.NEXT_PUBLIC_AUTH_API_URL ?? "http://localhost:8000")
+          : "http://localhost:8000"
+        }/api/v1/auth/webauthn/options?email=${encodeURIComponent(email)}`,
+      ).then((r) => r.json());
+      const credential = await startAuthentication(options);
+      const verification: { success: boolean; user?: UserProfile; error?: string } = await fetch(
+        `${typeof process !== "undefined"
+          ? (process.env.NEXT_PUBLIC_AUTH_API_URL ?? "http://localhost:8000")
+          : "http://localhost:8000"
+        }/api/v1/auth/webauthn/verify`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(credential),
+        },
+      ).then((r) => {
+        if (!r.ok) throw new Error(r.statusText);
+        return r.json();
+      });
+      if (verification.success && verification.user) {
+        this.currentUser = { ...verification.user, lastLoginAt: new Date().toISOString() };
+        persistUser(this.currentUser);
+        this.emit(this.currentUser);
+        return { success: true, user: this.currentUser };
+      }
+      return {
+        success: false,
+        error: verification.error || "Passkey verification failed on server.",
+        errorCode: "passkey-verification-failed",
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        error: e.message || "Passkey authentication failed.",
+        errorCode: "passkey-auth-error",
+      };
+    }
   }
 
   async getCurrentUser(): Promise<UserProfile | null> {
@@ -216,9 +287,7 @@ export class MockAuthAdapter implements AuthAdapter {
 
   onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void {
     this.listeners.add(callback);
-    if (this.currentUser) {
-      queueMicrotask(() => callback(this.currentUser));
-    }
+    queueMicrotask(() => callback(this.currentUser));
     return () => this.listeners.delete(callback);
   }
 }
@@ -399,15 +468,54 @@ export class BackendAuthAdapter implements AuthAdapter {
     return { success: true, user: this.currentUser };
   }
 
+  async verifyPasskey(_email?: string): Promise<AuthResult> {
+    if (typeof window === "undefined" || !window.PublicKeyCredential) {
+      return {
+        success: false,
+        error: "WebAuthn / Passkey authentication is not supported in this environment.",
+        errorCode: "passkey-not-supported",
+      };
+    }
+    try {
+      const email = _email ?? this.currentUser?.email ?? "";
+      const options = await this.request<any>(
+        `/api/v1/auth/webauthn/options?email=${encodeURIComponent(email)}`,
+      );
+      const credential = await startAuthentication(options);
+      const data = await this.request<{ success: boolean; user: UserProfile }>(
+        "/api/v1/auth/webauthn/verify",
+        {
+          method: "POST",
+          body: JSON.stringify(credential),
+        },
+      );
+      if (data.success && data.user) {
+        this.currentUser = { ...data.user, lastLoginAt: new Date().toISOString() };
+        persistUser(this.currentUser);
+        this.emit(this.currentUser);
+        return { success: true, user: this.currentUser };
+      }
+      return {
+        success: false,
+        error: "Passkey verification failed on server.",
+        errorCode: "passkey-verification-failed",
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        error: e.message || "Passkey authentication failed.",
+        errorCode: "passkey-auth-error",
+      };
+    }
+  }
+
   async getCurrentUser(): Promise<UserProfile | null> {
     return this.currentUser;
   }
 
   onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void {
     this.listeners.add(callback);
-    if (this.currentUser) {
-      queueMicrotask(() => callback(this.currentUser));
-    }
+    queueMicrotask(() => callback(this.currentUser));
     return () => this.listeners.delete(callback);
   }
 }

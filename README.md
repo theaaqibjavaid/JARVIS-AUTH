@@ -278,6 +278,61 @@ This is a **UI + adapter framework** — real security comes from whichever `Aut
 
 ---
 
+## 📦 NPM Package
+
+> **Coming soon — `@jarvis-security/sdk` is available as a published package.**
+
+### Installation (NPM Package)
+
+For any React / Next.js project:
+
+```bash
+npm install @jarvis-security/sdk
+```
+
+### Usage
+
+```tsx
+"use client";
+import {
+  AuthProvider,
+  AuthPortal,
+  CanvasBackground,
+  createAuthAdapter,
+} from "@jarvis-security/sdk";
+import "@jarvis-security/sdk/dist/jarvis.css"; // cyber theme (optional)
+
+const adapter = createAuthAdapter("mock");
+
+export default function AuthPage() {
+  return (
+    <AuthProvider adapter={adapter}>
+      <CanvasBackground />
+      <AuthPortal />
+    </AuthProvider>
+  );
+}
+```
+
+### Build the SDK locally
+
+```bash
+npm run build:sdk   # → dist/index.cjs, dist/index.mjs, dist/index.d.ts
+```
+
+### Subpath exports
+
+| Import path | Contains |
+|---|---|
+| `@jarvis-security/sdk` | All modules — barrel entry |
+| `@jarvis-security/sdk/auth-adapter` | Adapters only (`MockAuthAdapter`, `BackendAuthAdapter`, `createAuthAdapter`) |
+| `@jarvis-security/sdk/context` | `AuthProvider`, `useAuth` |
+| `@jarvis-security/sdk/components` | All React components |
+| `@jarvis-security/sdk/types` | All TypeScript types |
+| `@jarvis-security/sdk/sound-engine` | `SoundEngine` |
+
+---
+
 ## 🤝 Contributing
 
 ### PR Rules (per project policy)

@@ -17,6 +17,7 @@ export function PasskeyForm() {
     login,
     register,
     resetPassword,
+    verifyPasskey,
     error,
     status,
     playBeep,
@@ -71,14 +72,16 @@ export function PasskeyForm() {
     <form onSubmit={handleSubmit} className="space-y-4" noValidate>
       {isRegisterMode && (
         <div>
-          <label className="block text-xs text-cyber-cyan/70 tracking-widest mb-1 uppercase">
+          <label htmlFor="jarvis-fullname" className="block text-xs text-cyber-cyan/70 tracking-widest mb-1 uppercase">
             Full Name / Operative ID
           </label>
           <div className="relative">
             <UserCheck className="w-4 h-4 absolute left-3 top-3 text-cyber-cyan/50" />
             <input
+              id="jarvis-fullname"
               type="text"
               autoComplete="name"
+              aria-label="Full Name"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               placeholder="Tony Stark"
@@ -90,14 +93,16 @@ export function PasskeyForm() {
       )}
 
       <div>
-        <label className="block text-xs text-cyber-cyan/70 tracking-widest mb-1 uppercase">
+        <label htmlFor="jarvis-email" className="block text-xs text-cyber-cyan/70 tracking-widest mb-1 uppercase">
           Email Address
         </label>
         <div className="relative">
           <Mail className="w-4 h-4 absolute left-3 top-3 text-cyber-cyan/50" />
           <input
+            id="jarvis-email"
             type="email"
             autoComplete="email"
+            aria-label="Email Address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="stark@avengers.io"
@@ -109,14 +114,16 @@ export function PasskeyForm() {
       </div>
 
       <div>
-        <label className="block text-xs text-cyber-cyan/70 tracking-widest mb-1 uppercase">
+        <label htmlFor="jarvis-passkey" className="block text-xs text-cyber-cyan/70 tracking-widest mb-1 uppercase">
           Passkey
         </label>
         <div className="relative">
           <Lock className="w-4 h-4 absolute left-3 top-3 text-cyber-cyan/50" />
           <input
+            id="jarvis-passkey"
             type={showPassword ? "text" : "password"}
             autoComplete={isRegisterMode ? "new-password" : "current-password"}
+            aria-label="Passkey"
             value={password}
             minLength={6}
             required
@@ -149,6 +156,30 @@ export function PasskeyForm() {
           {displayError}
         </div>
       )}
+
+      <div className="relative my-4">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-cyber-cyan/30"></div>
+        </div>
+        <div className="relative flex justify-center">
+          <span className="px-3 text-xs text-cyber-cyan/50 bg-cyber-bg">
+            OR
+          </span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => {
+          playBeep(900, "sine", 0.1);
+          verifyPasskey();
+        }}
+        disabled={loading}
+        className="w-full bg-cyber-cyan/10 border-2 border-cyber-emerald hover:bg-cyber-cyan/30 text-cyber-emerald font-orbitron py-3 rounded tracking-widest font-bold transition-all shadow-cyber-glow flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+        aria-label="Use device passkey"
+      >
+        <span>USE DEVICE PASSKEY</span>
+      </button>
 
       <div className="flex justify-between items-center text-xs pt-1">
         <label className="flex items-center space-x-2 cursor-pointer text-cyber-cyan/70 hover:text-cyber-cyan">

@@ -1,32 +1,65 @@
 {
-  "name": "jarvis-security-suite",
+  "name": "@jarvis-security/sdk",
   "version": "1.0.0",
-  "private": true,
   "description": "J.A.R.V.I.S. Futuristic Pluggable Authentication Suite",
   "license": "MIT",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "build:sdk": "tsup"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^10.0.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.460.0",
-    "next": "^14.2.18",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "tailwind-merge": "^2.5.4"
   },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^15.0.7",
+    "@testing-library/user-event": "^14.5.2",
     "@types/node": "^20.17.6",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^1.6.1",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^24.1.3",
+    "next": "^14.2.18",
     "postcss": "^8.4.49",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "tailwindcss": "^3.4.15",
-    "typescript": "^5.6.3"
+    "tsup": "^8.5.1",
+    "typescript": "^5.6.3",
+    "vitest": "^1.6.1"
+  },
+  "allowScripts": {
+    "esbuild@0.27.7": true
   }
 }

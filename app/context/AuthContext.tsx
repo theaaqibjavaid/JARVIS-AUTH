@@ -12,6 +12,7 @@ import {
 import type {
   AccessModalState,
   AuthAdapter,
+  AuthResult,
   AuthStatus,
   BiometricMethod,
   TerminalMessage,
@@ -46,6 +47,7 @@ export interface AuthContextValue {
   verifyVoice: (audioBlob: Blob) => Promise<void>;
   verifyFingerprint: (scanData: string) => Promise<void>;
   enrollBiometrics: () => Promise<void>;
+  verifyPasskey: () => Promise<AuthResult>;
   setActiveMethod: (method: BiometricMethod) => void;
   toggleMode: () => void;
   toggleAudio: () => void;
@@ -61,18 +63,28 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({
   children,
-  adapter: adapterName = "mock",
+  adapter: adapterArg = "mock",
   adapterOptions,
 }: {
   children: ReactNode;
-  adapter?: AuthAdapterName;
+  adapter?: AuthAdapterName | AuthAdapter;
   adapterOptions?: { baseUrl?: string };
 }) {
   const adapter = useMemo(
-    () => createAuthAdapter(adapterName, adapterOptions),
+    () =>
+      typeof adapterArg === "string"
+        ? createAuthAdapter(adapterArg, adapterOptions)
+        : adapterArg,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [adapterName]
+    [adapterArg]
   );
+
+  const adapterName: AuthAdapterName = useMemo(() => {
+    const n = adapter.name.toLowerCase();
+    if (n.includes("backend")) return "backend";
+    if (n.includes("firebase")) return "firebase";
+    return "mock";
+  }, [adapter]);
 
   const [user, setUser] = useState<UserProfile | null>(null);
   const [status, setStatus] = useState<AuthStatus>("idle");
@@ -173,17 +185,31 @@ export function AuthProvider({
 
   useEffect(() => {
     setStatus("loading");
+    let cancelled = false;
     const unsub = adapter.onAuthStateChanged((u) => {
+      if (cancelled) return;
       setUser(u);
       setStatus(u ? "authenticated" : "unauthenticated");
     });
-    adapter.getCurrentUser().then((u) => {
-      if (u) {
+    (async () => {
+      try {
+        const u = await adapter.getCurrentUser();
+        if (cancelled) return;
         setUser(u);
-        setStatus("authenticated");
+        setStatus(u ? "authenticated" : "unauthenticated");
+      } catch {
+        if (cancelled) return;
+        setStatus("unauthenticated");
       }
-    });
-    return unsub;
+    })();
+    const safety = window.setTimeout(() => {
+      if (!cancelled) setStatus((s) => (s === "loading" ? "unauthenticated" : s));
+    }, 5000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(safety);
+      unsub();
+    };
   }, [adapter]);
 
   const login = useCallback(
@@ -194,12 +220,14 @@ export function AuthProvider({
       const res = await adapter.login(email, passkey);
       if (!res.success) {
         setError(res.error || "Authentication failed");
+        setUser(null);
         setStatus("error");
         playError();
         updateTerminal(`[ERROR]: ${res.error}`);
         showModal(false, "AUTHENTICATION FAILED", res.error || "");
         return;
       }
+      setUser(res.user ?? null);
       setStatus("authenticated");
       showModal(
         true,
@@ -218,12 +246,14 @@ export function AuthProvider({
       const res = await adapter.register(email, passkey, fullName);
       if (!res.success) {
         setError(res.error || "Registration failed");
+        setUser(null);
         setStatus("error");
         playError();
         updateTerminal(`[ERROR]: ${res.error}`);
         showModal(false, "REGISTRATION FAILED", res.error || "");
         return;
       }
+      setUser(res.user ?? null);
       setStatus("authenticated");
       showModal(
         true,
@@ -266,11 +296,13 @@ export function AuthProvider({
       updateTerminal("Analyzing facial geometry mesh...");
       const res = await adapter.verifyFace(imageBase64);
       if (!res.success) {
+        setUser(null);
         setStatus("error");
         playError();
         showModal(false, "FACIAL SCAN FAILED", res.error || "");
         return;
       }
+      setUser(res.user ?? null);
       setStatus("authenticated");
       showModal(
         true,
@@ -287,11 +319,13 @@ export function AuthProvider({
       updateTerminal("Listening for voice waveform match...");
       const res = await adapter.verifyVoice(audioBlob);
       if (!res.success) {
+        setUser(null);
         setStatus("error");
         playError();
         showModal(false, "VOICE VERIFICATION FAILED", res.error || "");
         return;
       }
+      setUser(res.user ?? null);
       setStatus("authenticated");
       showModal(
         true,
@@ -308,11 +342,13 @@ export function AuthProvider({
       updateTerminal("Fingerprint capacitive scan in progress...");
       const res = await adapter.verifyFingerprint(scanData);
       if (!res.success) {
+        setUser(null);
         setStatus("error");
         playError();
         showModal(false, "FINGERPRINT FAILED", res.error || "");
         return;
       }
+      setUser(res.user ?? null);
       setStatus("authenticated");
       showModal(
         true,
@@ -324,19 +360,45 @@ export function AuthProvider({
   );
 
   const enrollBiometrics = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      playError();
+      showModal(false, "ENROLLMENT FAILED", "No active session. Sign in first.");
+      return;
+    }
     const res = await adapter.enrollBiometrics(user.uid);
     if (!res.success) {
       playError();
       showModal(false, "ENROLLMENT FAILED", res.error || "");
       return;
     }
+    setUser((u) => (u ? { ...u, hasBiometrics: true } : u));
     showModal(
       true,
       "BIOMETRIC LINKED",
       "Device biometrics securely registered to profile."
     );
   }, [adapter, user, playError, showModal]);
+
+  const verifyPasskey = useCallback(async (): Promise<AuthResult> => {
+    setStatus("loading");
+    updateTerminal("Initializing WebAuthn passkey assertion...");
+    const res = await adapter.verifyPasskey(user?.email);
+    if (!res.success) {
+      setError(res.error || "Passkey authentication failed");
+      setStatus("error");
+      playError();
+      showModal(false, "PASSKEY FAILED", res.error || "");
+      return res;
+    }
+    setUser(res.user ?? null);
+    setStatus("authenticated");
+    showModal(
+      true,
+      "PASSKEY VERIFIED",
+      "Device passkey assertion matched in database."
+    );
+    return res;
+  }, [adapter, user, updateTerminal, playError, showModal]);
 
   const value: AuthContextValue = {
     user,
@@ -357,6 +419,7 @@ export function AuthProvider({
     verifyVoice,
     verifyFingerprint,
     enrollBiometrics,
+    verifyPasskey,
     setActiveMethod,
     toggleMode,
     toggleAudio,
