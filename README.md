@@ -14,8 +14,7 @@
 
 <br/>
 
-<img alt="JARVIS Banner" src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=Futuristic%20cyberpunk%20JARVIS%20Iron%20Man%20style%20HUD%20authentication%20interface%20with%20glowing%20cyan%20arc%20reactor%2C%20holographic%20rings%2C%20hacker%20grid%20lines%2C%20biometric%20scanner%20panels%2C%20neon%20cyan%20and%20dark%20navy%20colors%2C%20dark%20background&image_size=landscape_16_9"/>
-
+![JARVIS Auth](docs/JARVIS.png)
 </div>
 
 ---
