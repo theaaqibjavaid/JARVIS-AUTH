@@ -1,5 +1,5 @@
 {
-  "name": "@jarvis-security/sdk",
+  "name": "jarvis-security-sdk",
   "version": "1.0.0",
   "description": "J.A.R.V.I.S. Futuristic Pluggable Authentication Suite",
   "license": "MIT",
