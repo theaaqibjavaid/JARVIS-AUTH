@@ -23,6 +23,6 @@
       "@/*": ["./*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "__tests__", "vitest.setup.ts", "vitest.config.ts", "tsconfig.vitest.json", "packages"]
+  "include": ["next-env.d.ts", "app/**/*.ts", "app/**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "__tests__", "vitest.setup.ts", "vitest.config.ts", "tsconfig.vitest.json", "packages", "dist", "app/python-backend"]
 }

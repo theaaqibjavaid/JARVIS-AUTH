@@ -16,14 +16,8 @@ Run:
 """
 
 import os
-import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-
-# Ensure vendored deps are importable
-VENDOR_DIR = os.path.join(os.path.dirname(__file__), "vendor")
-if VENDOR_DIR not in os.sys.path:
-    os.sys.path.insert(0, VENDOR_DIR)
 
 # Set test env vars before importing the app
 os.environ["JARVIS_JWT_SECRET"] = "test-secret-for-ci"
