@@ -1,11 +1,22 @@
 {
-  "name": "jarvis-security-sdk",
+  "name": "@jarvis-security/sdk",
   "version": "1.0.0",
   "description": "J.A.R.V.I.S. Futuristic Pluggable Authentication Suite",
   "license": "MIT",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "keywords": [
+    "jarvis",
+    "security",
+    "authentication",
+    "biometric",
+    "pluggable"
+  ],
+  "author": "Aaqib Javaid",
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

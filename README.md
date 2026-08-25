@@ -6,7 +6,7 @@
 
 <a href="https://github.com/theaaqibjavaid/JARVIS-AUTH/actions"><img src="https://github.com/theaaqibjavaid/JARVIS-AUTH/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 [![Tests](https://img.shields.io/badge/tests-64%20passed-brightgreen)](#-testing)
-[![npm](https://img.shields.io/npm/v/jarvis-security-sdk?label=%40jarvis-security%2Fsdk)](https://www.npmjs.com/package/jarvis-security-sdk)
+[![npm](https://img.shields.io/npm/v/@jarvis-security/sdk?label=%40jarvis-security%2Fsdk)](https://www.npmjs.com/package/@jarvis-security/sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-cyan.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](./tsconfig.json)
 
