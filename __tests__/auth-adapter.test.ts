@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAuthAdapter,
   MockAuthAdapter,
@@ -6,6 +6,42 @@ import {
   __resetMockAdapterStateForTests,
 } from "@/app/lib/auth-adapter";
 import type { AuthAdapter, AuthResult } from "@/app/types";
+import {
+  enrollPlatformBiometric,
+  verifyPlatformBiometric,
+} from "@/app/lib/webauthn-biometrics";
+import { extractVoiceprint } from "@/app/lib/voiceprint";
+
+// Keep the real credential/voiceprint stores (so enroll→match behaves
+// genuinely) but stub the OS biometric prompt + audio DSP at the seam.
+vi.mock("@/app/lib/webauthn-biometrics", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/app/lib/webauthn-biometrics")>();
+  return {
+    ...actual,
+    enrollPlatformBiometric: vi.fn(),
+    verifyPlatformBiometric: vi.fn(),
+  };
+});
+
+vi.mock("@/app/lib/voiceprint", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/app/lib/voiceprint")>();
+  return {
+    ...actual,
+    extractVoiceprint: vi.fn(),
+  };
+});
+
+const mockedEnrollPlatform = vi.mocked(enrollPlatformBiometric);
+const mockedVerifyPlatform = vi.mocked(verifyPlatformBiometric);
+const mockedExtractVoiceprint = vi.mocked(extractVoiceprint);
+
+/** Deterministic 26-dim probe so enroll and verify hit the same voiceprint. */
+const fixedVoiceprint = () => {
+  const v = new Float32Array(26);
+  for (let i = 0; i < v.length; i++) v[i] = 1 + i * 0.01;
+  return v;
+};
 
 const STORAGE_KEY = "jarvis_auth_user";
 
@@ -25,6 +61,9 @@ describe("MockAuthAdapter", () => {
 
   beforeEach(() => {
     clearStorage();
+    mockedEnrollPlatform.mockReset();
+    mockedVerifyPlatform.mockReset();
+    mockedExtractVoiceprint.mockReset();
     adapter = new MockAuthAdapter();
   });
 
@@ -142,22 +181,76 @@ describe("MockAuthAdapter", () => {
     });
   });
 
-  describe("biometric shortcuts", () => {
-    it("verifyFace logs in with demo user", async () => {
-      const res = await adapter.verifyFace("data:image/jpeg;base64,xx");
+  describe("device biometrics (face / fingerprint via WebAuthn platform)", () => {
+    it("verifyFace authenticates after a successful platform assertion", async () => {
+      mockedVerifyPlatform.mockResolvedValue({
+        success: true,
+        email: "face@avengers.io",
+        credentialId: "cred-face",
+      });
+      const res = await adapter.verifyFace();
       expect(res.success).toBe(true);
-      expect(res.user?.uid).toMatch(/^FACE-/);
+      expect(res.user?.email).toBe("face@avengers.io");
+      expect(res.user?.uid).toMatch(/^BIO-/);
       expect(res.user?.hasBiometrics).toBe(true);
     });
-    it("verifyVoice logs in with demo user", async () => {
-      const res = await adapter.verifyVoice(new Blob(["fake"]));
-      expect(res.success).toBe(true);
-      expect(res.user?.uid).toMatch(/^VOICE-/);
+
+    it("verifyFace fails when the platform assertion fails", async () => {
+      mockedVerifyPlatform.mockResolvedValue({
+        success: false,
+        error: "No device biometric enrolled yet.",
+        errorCode: "no-platform-credential",
+      });
+      const res = await adapter.verifyFace();
+      expect(res.success).toBe(false);
+      expect(res.errorCode).toBe("no-platform-credential");
+      expect(await adapter.getCurrentUser()).toBeNull();
     });
-    it("verifyFingerprint logs in with demo user", async () => {
-      const res = await adapter.verifyFingerprint("scandata");
+
+    it("verifyFingerprint authenticates after a successful platform assertion", async () => {
+      mockedVerifyPlatform.mockResolvedValue({
+        success: true,
+        email: "fp@avengers.io",
+        credentialId: "cred-fp",
+      });
+      const res = await adapter.verifyFingerprint();
       expect(res.success).toBe(true);
-      expect(res.user?.uid).toMatch(/^FP-/);
+      expect(res.user?.email).toBe("fp@avengers.io");
+      expect(res.user?.uid).toMatch(/^BIO-/);
+      expect(res.user?.hasBiometrics).toBe(true);
+    });
+  });
+
+  describe("voice biometrics (register first, then login)", () => {
+    it("verifyVoice fails with voice-no-match when nothing is enrolled", async () => {
+      mockedExtractVoiceprint.mockResolvedValue(fixedVoiceprint());
+      const res = await adapter.verifyVoice(new Blob(["probe"]));
+      expect(res.success).toBe(false);
+      expect(res.errorCode).toBe("voice-no-match");
+    });
+
+    it("verifyVoice logs in the enrolled operative after enrollVoice", async () => {
+      mockedExtractVoiceprint.mockResolvedValue(fixedVoiceprint());
+      const u = validUser();
+      await adapter.register(u.email, u.passkey, u.fullName);
+      const enroll = await adapter.enrollVoice(new Blob(["sample"]));
+      expect(enroll.success).toBe(true);
+      await adapter.logout();
+      expect(await adapter.getCurrentUser()).toBeNull();
+
+      const res = await adapter.verifyVoice(new Blob(["probe"]));
+      expect(res.success).toBe(true);
+      expect(res.user?.email).toBe(u.email.toLowerCase());
+      expect(res.user?.uid).toMatch(/^REG-/);
+      expect(res.user?.hasBiometrics).toBe(true);
+    });
+
+    it("verifyVoice surfaces DSP errors as voice-error", async () => {
+      mockedExtractVoiceprint.mockRejectedValue(new Error("decode failed"));
+      const res = await adapter.verifyVoice(new Blob(["bad"]));
+      expect(res.success).toBe(false);
+      expect(res.errorCode).toBe("voice-error");
+      expect(res.error).toBe("decode failed");
     });
   });
 
@@ -166,8 +259,15 @@ describe("MockAuthAdapter", () => {
       const res = await adapter.enrollBiometrics("X");
       expect(res.success).toBe(false);
       expect(res.errorCode).toBe("no-session");
+      expect(mockedEnrollPlatform).not.toHaveBeenCalled();
     });
-    it("flips hasBiometrics=true for logged-in user", async () => {
+
+    it("flips hasBiometrics=true after a successful platform enrollment", async () => {
+      mockedEnrollPlatform.mockResolvedValue({
+        success: true,
+        email: validUser().email,
+        credentialId: "cred-1",
+      });
       const u = validUser();
       await adapter.register(u.email, u.passkey, u.fullName);
       const user = await adapter.getCurrentUser();
@@ -176,6 +276,41 @@ describe("MockAuthAdapter", () => {
       expect(res.success).toBe(true);
       expect(res.user?.hasBiometrics).toBe(true);
       expect((await adapter.getCurrentUser())?.hasBiometrics).toBe(true);
+      expect(mockedEnrollPlatform).toHaveBeenCalledWith(
+        expect.objectContaining({ email: u.email.toLowerCase() }),
+        expect.anything()
+      );
+    });
+
+    it("propagates platform enrollment failure without flipping hasBiometrics", async () => {
+      mockedEnrollPlatform.mockResolvedValue({
+        success: false,
+        error: "No device biometric authenticator available.",
+        errorCode: "platform-biometric-unavailable",
+      });
+      const u = validUser();
+      await adapter.register(u.email, u.passkey, u.fullName);
+      const res = await adapter.enrollBiometrics("uid");
+      expect(res.success).toBe(false);
+      expect(res.errorCode).toBe("platform-biometric-unavailable");
+      expect((await adapter.getCurrentUser())?.hasBiometrics).toBe(false);
+    });
+  });
+
+  describe("enrollVoice", () => {
+    it("fails without active session", async () => {
+      const res = await adapter.enrollVoice(new Blob(["x"]));
+      expect(res.success).toBe(false);
+      expect(res.errorCode).toBe("no-session");
+    });
+
+    it("reports voice-enroll-error when DSP extraction fails", async () => {
+      mockedExtractVoiceprint.mockRejectedValue(new Error("mic denied"));
+      const u = validUser();
+      await adapter.register(u.email, u.passkey, u.fullName);
+      const res = await adapter.enrollVoice(new Blob(["x"]));
+      expect(res.success).toBe(false);
+      expect(res.errorCode).toBe("voice-enroll-error");
     });
   });
 
@@ -253,19 +388,108 @@ describe("createAuthAdapter factory", () => {
   });
 });
 
-describe("BackendAuthAdapter stub", () => {
+describe("BackendAuthAdapter", () => {
+  const originalFetch = global.fetch;
+
   beforeEach(() => {
     window.localStorage.removeItem("jarvis_auth_user");
+    mockedEnrollPlatform.mockReset();
+    mockedVerifyPlatform.mockReset();
+    mockedExtractVoiceprint.mockReset();
   });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  const jsonResponse = (body: unknown, ok = true) =>
+    ({
+      ok,
+      statusText: ok ? "OK" : "Unauthorized",
+      json: async () => body,
+    }) as unknown as Response;
+
   it("constructs with default base URL", () => {
     const a = new BackendAuthAdapter();
     expect(a.name).toBe("BackendAuthAdapter");
   });
-  it("verifyFingerprint fallback creates placeholder user with success", async () => {
+
+  it("verifyFingerprint fails when the local platform gate fails (no server call)", async () => {
+    mockedVerifyPlatform.mockResolvedValue({
+      success: false,
+      error: "No device biometric enrolled yet.",
+      errorCode: "no-platform-credential",
+    });
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock;
     const a = new BackendAuthAdapter("http://example.invalid");
-    const res = (await a.verifyFingerprint("scan")) as AuthResult;
+    const res = (await a.verifyFingerprint()) as AuthResult;
+    expect(res.success).toBe(false);
+    expect(res.errorCode).toBe("no-platform-credential");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("verifyFingerprint exchanges a platform assertion for a backend session", async () => {
+    mockedVerifyPlatform.mockResolvedValue({
+      success: true,
+      email: "fp@backend.io",
+      credentialId: "cred-9",
+    });
+    const serverUser = {
+      uid: "BE-1",
+      email: "fp@backend.io",
+      fullName: "Backend Operative",
+      clearanceLevel: "Level 1",
+      hasBiometrics: true,
+      createdAt: new Date().toISOString(),
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ success: true, user: serverUser })
+    );
+    global.fetch = fetchMock;
+
+    const a = new BackendAuthAdapter("http://example.invalid");
+    const res = (await a.verifyFingerprint()) as AuthResult;
     expect(res.success).toBe(true);
-    expect(res.user?.uid).toMatch(/^FP-BE-/);
+    expect(res.user?.email).toBe("fp@backend.io");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://example.invalid/api/v1/auth/biometric-login");
+    expect(JSON.parse(init.body)).toEqual({
+      email: "fp@backend.io",
+      method: "fingerprint",
+      credential_id: "cred-9",
+    });
+  });
+
+  it("verifyFace reports failure when the server rejects the biometric login", async () => {
+    mockedVerifyPlatform.mockResolvedValue({
+      success: true,
+      email: "face@backend.io",
+      credentialId: "cred-10",
+    });
+    global.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ detail: "Biometrics not enrolled for this operative" }, false)
+      );
+    const a = new BackendAuthAdapter("http://example.invalid");
+    const res = (await a.verifyFace()) as AuthResult;
+    expect(res.success).toBe(false);
+    expect(res.error).toBe("Biometrics not enrolled for this operative");
+  });
+
+  it("verifyVoice requires a local DSP match before calling the backend", async () => {
+    mockedExtractVoiceprint.mockResolvedValue(fixedVoiceprint());
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock;
+    const a = new BackendAuthAdapter("http://example.invalid");
+    const res = (await a.verifyVoice(new Blob(["probe"]))) as AuthResult;
+    // Nothing enrolled in the voiceprint store → local gate fails, no server call.
+    expect(res.success).toBe(false);
+    expect(res.errorCode).toBe("voice-no-match");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
   it("enrollBiometrics fails without active session", async () => {
     const a = new BackendAuthAdapter("http://example.invalid");

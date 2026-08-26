@@ -43,10 +43,11 @@ export interface AuthContextValue {
   ) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
-  verifyFace: (imageBase64: string) => Promise<void>;
+  verifyFace: () => Promise<void>;
   verifyVoice: (audioBlob: Blob) => Promise<void>;
-  verifyFingerprint: (scanData: string) => Promise<void>;
+  verifyFingerprint: () => Promise<void>;
   enrollBiometrics: () => Promise<void>;
+  enrollVoice: (audioBlob: Blob) => Promise<void>;
   verifyPasskey: () => Promise<AuthResult>;
   setActiveMethod: (method: BiometricMethod) => void;
   toggleMode: () => void;
@@ -290,33 +291,32 @@ export function AuthProvider({
     [adapter, playError, showModal]
   );
 
-  const verifyFace = useCallback(
-    async (imageBase64: string) => {
-      setStatus("loading");
-      updateTerminal("Analyzing facial geometry mesh...");
-      const res = await adapter.verifyFace(imageBase64);
-      if (!res.success) {
-        setUser(null);
-        setStatus("error");
-        playError();
-        showModal(false, "FACIAL SCAN FAILED", res.error || "");
-        return;
-      }
-      setUser(res.user ?? null);
-      setStatus("authenticated");
-      showModal(
-        true,
-        "FACIAL SCAN VERIFIED",
-        "Iris vector scan matched in database."
-      );
-    },
-    [adapter, updateTerminal, playError, showModal]
-  );
+  const verifyFace = useCallback(async () => {
+    setStatus("loading");
+    updateTerminal(
+      "Requesting device face verification (Windows Hello / Face ID)..."
+    );
+    const res = await adapter.verifyFace();
+    if (!res.success) {
+      setUser(null);
+      setStatus("error");
+      playError();
+      showModal(false, "FACIAL SCAN FAILED", res.error || "");
+      return;
+    }
+    setUser(res.user ?? null);
+    setStatus("authenticated");
+    showModal(
+      true,
+      "FACIAL SCAN VERIFIED",
+      "Device face biometric matched and authorized."
+    );
+  }, [adapter, updateTerminal, playError, showModal]);
 
   const verifyVoice = useCallback(
     async (audioBlob: Blob) => {
       setStatus("loading");
-      updateTerminal("Listening for voice waveform match...");
+      updateTerminal("Extracting voiceprint and matching against enrolled samples...");
       const res = await adapter.verifyVoice(audioBlob);
       if (!res.success) {
         setUser(null);
@@ -336,28 +336,25 @@ export function AuthProvider({
     [adapter, updateTerminal, playError, showModal]
   );
 
-  const verifyFingerprint = useCallback(
-    async (scanData: string) => {
-      setStatus("loading");
-      updateTerminal("Fingerprint capacitive scan in progress...");
-      const res = await adapter.verifyFingerprint(scanData);
-      if (!res.success) {
-        setUser(null);
-        setStatus("error");
-        playError();
-        showModal(false, "FINGERPRINT FAILED", res.error || "");
-        return;
-      }
-      setUser(res.user ?? null);
-      setStatus("authenticated");
-      showModal(
-        true,
-        "FINGERPRINT AUTHORIZED",
-        "Dermal ridge pattern verified."
-      );
-    },
-    [adapter, updateTerminal, playError, showModal]
-  );
+  const verifyFingerprint = useCallback(async () => {
+    setStatus("loading");
+    updateTerminal("Touch the fingerprint sensor to verify (Windows Hello / Touch ID)...");
+    const res = await adapter.verifyFingerprint();
+    if (!res.success) {
+      setUser(null);
+      setStatus("error");
+      playError();
+      showModal(false, "FINGERPRINT FAILED", res.error || "");
+      return;
+    }
+    setUser(res.user ?? null);
+    setStatus("authenticated");
+    showModal(
+      true,
+      "FINGERPRINT AUTHORIZED",
+      "Device fingerprint biometric matched and authorized."
+    );
+  }, [adapter, updateTerminal, playError, showModal]);
 
   const enrollBiometrics = useCallback(async () => {
     if (!user) {
@@ -365,6 +362,7 @@ export function AuthProvider({
       showModal(false, "ENROLLMENT FAILED", "No active session. Sign in first.");
       return;
     }
+    updateTerminal("Prompting device biometric enrollment (follow the OS prompt)...");
     const res = await adapter.enrollBiometrics(user.uid);
     if (!res.success) {
       playError();
@@ -377,7 +375,35 @@ export function AuthProvider({
       "BIOMETRIC LINKED",
       "Device biometrics securely registered to profile."
     );
-  }, [adapter, user, playError, showModal]);
+  }, [adapter, user, playError, showModal, updateTerminal]);
+
+  const enrollVoice = useCallback(
+    async (audioBlob: Blob) => {
+      if (!user) {
+        playError();
+        showModal(
+          false,
+          "VOICE ENROLLMENT FAILED",
+          "No active session. Sign in first."
+        );
+        return;
+      }
+      updateTerminal("Extracting and storing voiceprint signature...");
+      const res = await adapter.enrollVoice(audioBlob);
+      if (!res.success) {
+        playError();
+        showModal(false, "VOICE ENROLLMENT FAILED", res.error || "");
+        return;
+      }
+      setUser((u) => (u ? { ...u, hasBiometrics: true } : u));
+      showModal(
+        true,
+        "VOICEPRINT LINKED",
+        "Voice signature securely registered to profile."
+      );
+    },
+    [adapter, user, playError, showModal, updateTerminal]
+  );
 
   const verifyPasskey = useCallback(async (): Promise<AuthResult> => {
     setStatus("loading");
@@ -419,6 +445,7 @@ export function AuthProvider({
     verifyVoice,
     verifyFingerprint,
     enrollBiometrics,
+    enrollVoice,
     verifyPasskey,
     setActiveMethod,
     toggleMode,

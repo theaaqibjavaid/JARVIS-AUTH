@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import type { BiometricMethod } from "../types";
+import { PlatformCredentialStore } from "../lib/webauthn-biometrics";
+import { VoiceprintStore } from "../lib/voiceprint";
 import { ArcReactorHud } from "./ArcReactorHud";
 import { PasskeyForm } from "./biometrics/PasskeyForm";
 import { FacialScanner } from "./biometrics/FacialScanner";
@@ -140,16 +142,20 @@ function BiometricTabs() {
 
 function DashboardPanel() {
   const { user, logout, enrollBiometrics, status } = useAuth();
-  const [webauthnSupported, setWebauthnSupported] = useState(false);
+  const [showVoiceEnroll, setShowVoiceEnroll] = useState(false);
+  const [deviceEnrolled, setDeviceEnrolled] = useState(false);
+  const [voiceEnrolled, setVoiceEnrolled] = useState(false);
 
+  // Reflect the true per-method enrollment state from the on-device stores.
   useEffect(() => {
-    setWebauthnSupported(
-      typeof window !== "undefined" &&
-        typeof window.PublicKeyCredential !== "undefined"
-    );
-  }, []);
+    if (!user) return;
+    setDeviceEnrolled(new PlatformCredentialStore().has(user.email));
+    setVoiceEnrolled(new VoiceprintStore().has(user.email));
+  }, [user]);
 
   if (!user) return null;
+
+  const busy = status === "loading";
 
   return (
     <div className="cyber-panel w-full max-w-md p-6 md:p-8 rounded-lg shadow-cyber-glow relative space-y-6 animate-[fadeIn_.3s_ease-out]">
@@ -196,15 +202,27 @@ function DashboardPanel() {
           </span>
         </div>
         <div className="flex justify-between gap-2">
-          <span className="text-cyber-cyan/50 shrink-0">BIOMETRICS:</span>
+          <span className="text-cyber-cyan/50 shrink-0">DEVICE BIOMETRIC:</span>
           <span
             className={
-              user.hasBiometrics
+              deviceEnrolled
                 ? "text-cyber-emerald font-bold"
                 : "text-cyber-cyan font-bold"
             }
           >
-            {user.hasBiometrics ? "ENROLLED" : "NOT ENROLLED"}
+            {deviceEnrolled ? "ENROLLED" : "NOT ENROLLED"}
+          </span>
+        </div>
+        <div className="flex justify-between gap-2">
+          <span className="text-cyber-cyan/50 shrink-0">VOICEPRINT:</span>
+          <span
+            className={
+              voiceEnrolled
+                ? "text-cyber-emerald font-bold"
+                : "text-cyber-cyan font-bold"
+            }
+          >
+            {voiceEnrolled ? "ENROLLED" : "NOT ENROLLED"}
           </span>
         </div>
       </div>
@@ -212,23 +230,39 @@ function DashboardPanel() {
       <button
         type="button"
         onClick={enrollBiometrics}
-        disabled={status === "loading" || user.hasBiometrics}
+        disabled={busy || deviceEnrolled}
         className="w-full bg-cyber-cyan/10 border border-cyber-cyan hover:bg-cyber-cyan/20 text-cyber-cyan py-2.5 rounded font-orbitron text-xs tracking-wider transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <Fingerprint className="w-4 h-4" />
         <span>
-          {webauthnSupported
-            ? user.hasBiometrics
-              ? "BIOMETRICS ALREADY ENROLLED"
-              : "ENROLL DEVICE TOUCH ID / FACE ID"
-            : "ENROLL BIOMETRICS (SIMULATED)"}
+          {deviceEnrolled
+            ? "DEVICE BIOMETRIC ENROLLED"
+            : "ENROLL DEVICE BIOMETRIC (TOUCH ID / FACE ID)"}
         </span>
       </button>
 
       <button
         type="button"
+        onClick={() => setShowVoiceEnroll((v) => !v)}
+        disabled={busy}
+        className="w-full bg-cyber-cyan/10 border border-cyber-cyan hover:bg-cyber-cyan/20 text-cyber-cyan py-2.5 rounded font-orbitron text-xs tracking-wider transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <Mic className="w-4 h-4" />
+        <span>
+          {showVoiceEnroll
+            ? "HIDE VOICE ENROLLMENT"
+            : voiceEnrolled
+              ? "RE-ENROLL VOICEPRINT"
+              : "ENROLL VOICEPRINT"}
+        </span>
+      </button>
+
+      {showVoiceEnroll && <VoiceScanner mode="enroll" />}
+
+      <button
+        type="button"
         onClick={logout}
-        disabled={status === "loading"}
+        disabled={busy}
         className="w-full bg-cyber-red/10 border border-cyber-red hover:bg-cyber-red/30 text-cyber-red font-orbitron py-3 rounded tracking-widest font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-60"
       >
         <LogOut className="w-4 h-4" />

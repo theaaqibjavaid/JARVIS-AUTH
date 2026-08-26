@@ -1,14 +1,22 @@
 import type { AuthAdapter, AuthResult, UserProfile } from "../types";
+import { startAuthentication } from "@simplewebauthn/browser";
 import {
-  startRegistration,
-  startAuthentication,
-} from "@simplewebauthn/browser";
+  enrollPlatformBiometric,
+  verifyPlatformBiometric,
+  PlatformCredentialStore,
+} from "./webauthn-biometrics";
+import { extractVoiceprint, VoiceprintStore } from "./voiceprint";
 
 const STORAGE_KEY = "jarvis_auth_user";
 const DEMO_USERS: Record<string, { passkey: string; user: UserProfile }> = {};
 
+const voiceprintStore = new VoiceprintStore();
+const platformCredentialStore = new PlatformCredentialStore();
+
 export function __resetMockAdapterStateForTests(): void {
   Object.keys(DEMO_USERS).forEach((k) => delete DEMO_USERS[k]);
+  voiceprintStore.clear();
+  platformCredentialStore.clear();
   try {
     if (typeof window !== "undefined") window.localStorage.removeItem(STORAGE_KEY);
   } catch {
@@ -164,59 +172,36 @@ export class MockAuthAdapter implements AuthAdapter {
     };
   }
 
-  async verifyFace(_imageBase64: string): Promise<AuthResult> {
-    const user = this.currentUser || {
-      uid: generateUid("FACE"),
-      email: "stark@avengers.io",
-      fullName: "Tony Stark (Facial Match)",
+  /** Resolve a full profile for an email (falls back to a minimal profile). */
+  private resolveUserByEmail(email: string): UserProfile {
+    const key = email.toLowerCase();
+    const entry = DEMO_USERS[key];
+    if (entry) return entry.user;
+    return {
+      uid: generateUid("BIO"),
+      email: key,
+      fullName: key.split("@")[0] || "Operative",
       clearanceLevel: "Level 1",
+      hasBiometrics: true,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  /** Stamp, persist and broadcast an authenticated user. */
+  private commitUser(user: UserProfile): UserProfile {
+    const stamped: UserProfile = {
+      ...user,
       hasBiometrics: true,
       lastLoginAt: new Date().toISOString(),
     };
-    this.currentUser = user;
-    persistUser(user);
-    this.emit(user);
-    return { success: true, user };
+    this.currentUser = stamped;
+    persistUser(stamped);
+    this.emit(stamped);
+    return stamped;
   }
 
-  async verifyVoice(_audioBlob: Blob): Promise<AuthResult> {
-    const user = this.currentUser || {
-      uid: generateUid("VOICE"),
-      email: "stark@avengers.io",
-      fullName: "Tony Stark (Voice Match)",
-      clearanceLevel: "Level 1",
-      hasBiometrics: true,
-      lastLoginAt: new Date().toISOString(),
-    };
-    this.currentUser = user;
-    persistUser(user);
-    this.emit(user);
-    return { success: true, user };
-  }
-
-  async verifyFingerprint(_scanData: string): Promise<AuthResult> {
-    const user = this.currentUser || {
-      uid: generateUid("FP"),
-      email: "stark@avengers.io",
-      fullName: "Tony Stark (Fingerprint Match)",
-      clearanceLevel: "Level 1",
-      hasBiometrics: true,
-      lastLoginAt: new Date().toISOString(),
-    };
-    this.currentUser = user;
-    persistUser(user);
-    this.emit(user);
-    return { success: true, user };
-  }
-
-  async enrollBiometrics(userId: string): Promise<AuthResult> {
-    if (!this.currentUser) {
-      return {
-        success: false,
-        error: "Active session required for biometric enrollment.",
-        errorCode: "no-session",
-      };
-    }
+  private markBiometricsEnrolled(): void {
+    if (!this.currentUser) return;
     this.currentUser = { ...this.currentUser, hasBiometrics: true };
     const key = this.currentUser.email.toLowerCase();
     if (DEMO_USERS[key]) {
@@ -227,7 +212,103 @@ export class MockAuthAdapter implements AuthAdapter {
     }
     persistUser(this.currentUser);
     this.emit(this.currentUser);
+  }
+
+  /** Shared real WebAuthn platform-biometric login gate (face + fingerprint). */
+  private async platformBiometricLogin(): Promise<AuthResult> {
+    const result = await verifyPlatformBiometric(
+      this.currentUser?.email,
+      platformCredentialStore
+    );
+    if (!result.success || !result.email) {
+      return {
+        success: false,
+        error: result.error || "Device biometric verification failed.",
+        errorCode: result.errorCode || "biometric-failed",
+      };
+    }
+    const user = this.commitUser(this.resolveUserByEmail(result.email));
+    return { success: true, user };
+  }
+
+  async verifyFace(): Promise<AuthResult> {
+    return this.platformBiometricLogin();
+  }
+
+  async verifyVoice(audioBlob: Blob): Promise<AuthResult> {
+    try {
+      const probe = await extractVoiceprint(audioBlob);
+      const match = voiceprintStore.matchBest(probe);
+      if (!match) {
+        return {
+          success: false,
+          error:
+            "Voice did not match any enrolled operative. Re-enroll or try again.",
+          errorCode: "voice-no-match",
+        };
+      }
+      const user = this.commitUser(this.resolveUserByEmail(match.email));
+      return { success: true, user };
+    } catch (e: any) {
+      return {
+        success: false,
+        error: e?.message || "Voice verification failed.",
+        errorCode: "voice-error",
+      };
+    }
+  }
+
+  async verifyFingerprint(): Promise<AuthResult> {
+    return this.platformBiometricLogin();
+  }
+
+  async enrollBiometrics(_userId: string): Promise<AuthResult> {
+    if (!this.currentUser) {
+      return {
+        success: false,
+        error: "Active session required for biometric enrollment.",
+        errorCode: "no-session",
+      };
+    }
+    const result = await enrollPlatformBiometric(
+      {
+        uid: this.currentUser.uid,
+        email: this.currentUser.email,
+        fullName: this.currentUser.fullName,
+      },
+      platformCredentialStore
+    );
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error || "Device biometric enrollment failed.",
+        errorCode: result.errorCode || "enroll-failed",
+      };
+    }
+    this.markBiometricsEnrolled();
     return { success: true, user: this.currentUser };
+  }
+
+  async enrollVoice(audioBlob: Blob): Promise<AuthResult> {
+    if (!this.currentUser) {
+      return {
+        success: false,
+        error: "Active session required for voice enrollment.",
+        errorCode: "no-session",
+      };
+    }
+    try {
+      const voiceprint = await extractVoiceprint(audioBlob);
+      voiceprintStore.enroll(this.currentUser.email, voiceprint);
+      this.markBiometricsEnrolled();
+      return { success: true, user: this.currentUser };
+    } catch (e: any) {
+      return {
+        success: false,
+        error: e?.message || "Voice enrollment failed.",
+        errorCode: "voice-enroll-error",
+      };
+    }
   }
 
   async verifyPasskey(_email?: string): Promise<AuthResult> {
@@ -398,60 +479,89 @@ export class BackendAuthAdapter implements AuthAdapter {
     return { success: true };
   }
 
-  async verifyFace(imageBase64: string): Promise<AuthResult> {
+  /** Establish a session with the backend after a successful local biometric gate. */
+  private async biometricLogin(
+    email: string,
+    method: "face" | "voice" | "fingerprint",
+    credentialId?: string
+  ): Promise<AuthResult> {
     try {
       const data = await this.request<{ success: boolean; user: UserProfile }>(
-        "/api/v1/auth/verify-face",
+        "/api/v1/auth/biometric-login",
         {
           method: "POST",
-          body: JSON.stringify({ image_base64: imageBase64 }),
+          body: JSON.stringify({
+            email,
+            method,
+            credential_id: credentialId,
+          }),
         }
       );
       if (data.success && data.user) {
         this.currentUser = { ...data.user, lastLoginAt: new Date().toISOString() };
         persistUser(this.currentUser);
         this.emit(this.currentUser);
+        return { success: true, user: this.currentUser };
       }
-      return { success: data.success, user: data.user };
+      return {
+        success: false,
+        error: "Biometric login was rejected by the server.",
+        errorCode: "biometric-login-rejected",
+      };
     } catch (e: any) {
-      return { success: false, error: e.message || "Facial verification failed" };
+      return { success: false, error: e.message || "Biometric login failed" };
     }
+  }
+
+  async verifyFace(): Promise<AuthResult> {
+    const result = await verifyPlatformBiometric(
+      this.currentUser?.email,
+      platformCredentialStore
+    );
+    if (!result.success || !result.email) {
+      return {
+        success: false,
+        error: result.error || "Device biometric verification failed.",
+        errorCode: result.errorCode || "biometric-failed",
+      };
+    }
+    return this.biometricLogin(result.email, "face", result.credentialId);
   }
 
   async verifyVoice(audioBlob: Blob): Promise<AuthResult> {
     try {
-      const fd = new FormData();
-      fd.append("file", audioBlob, "voice.wav");
-      const res = await fetch(`${this.baseUrl}/api/v1/auth/verify-voice`, {
-        method: "POST",
-        body: fd,
-      });
-      if (!res.ok) throw new Error(res.statusText);
-      const data = (await res.json()) as { success: boolean; user: UserProfile };
-      if (data.success && data.user) {
-        this.currentUser = { ...data.user, lastLoginAt: new Date().toISOString() };
-        persistUser(this.currentUser);
-        this.emit(this.currentUser);
+      const probe = await extractVoiceprint(audioBlob);
+      const match = voiceprintStore.matchBest(probe);
+      if (!match) {
+        return {
+          success: false,
+          error: "Voice did not match any enrolled operative.",
+          errorCode: "voice-no-match",
+        };
       }
-      return { success: data.success, user: data.user };
+      return this.biometricLogin(match.email, "voice");
     } catch (e: any) {
-      return { success: false, error: e.message || "Voice verification failed" };
+      return {
+        success: false,
+        error: e?.message || "Voice verification failed.",
+        errorCode: "voice-error",
+      };
     }
   }
 
-  async verifyFingerprint(_scanData: string): Promise<AuthResult> {
-    const fallbackUser: UserProfile = {
-      uid: generateUid("FP-BE"),
-      email: "stark@avengers.io",
-      fullName: "Tony Stark (Backend FP)",
-      clearanceLevel: "Level 1",
-      hasBiometrics: true,
-      lastLoginAt: new Date().toISOString(),
-    };
-    this.currentUser = fallbackUser;
-    persistUser(fallbackUser);
-    this.emit(fallbackUser);
-    return { success: true, user: fallbackUser };
+  async verifyFingerprint(): Promise<AuthResult> {
+    const result = await verifyPlatformBiometric(
+      this.currentUser?.email,
+      platformCredentialStore
+    );
+    if (!result.success || !result.email) {
+      return {
+        success: false,
+        error: result.error || "Device biometric verification failed.",
+        errorCode: result.errorCode || "biometric-failed",
+      };
+    }
+    return this.biometricLogin(result.email, "fingerprint", result.credentialId);
   }
 
   async enrollBiometrics(_userId: string): Promise<AuthResult> {
@@ -462,10 +572,62 @@ export class BackendAuthAdapter implements AuthAdapter {
         errorCode: "no-session",
       };
     }
+    const result = await enrollPlatformBiometric(
+      {
+        uid: this.currentUser.uid,
+        email: this.currentUser.email,
+        fullName: this.currentUser.fullName,
+      },
+      platformCredentialStore
+    );
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error || "Device biometric enrollment failed.",
+        errorCode: result.errorCode || "enroll-failed",
+      };
+    }
+    // Inform the backend so it can persist the credential binding. Non-fatal:
+    // the client-side credential store already holds the platform credential.
+    try {
+      await this.request("/api/v1/auth/enroll-biometric", {
+        method: "POST",
+        body: JSON.stringify({
+          email: this.currentUser.email,
+          credential_id: result.credentialId,
+        }),
+      });
+    } catch {
+      /* non-fatal */
+    }
     this.currentUser = { ...this.currentUser, hasBiometrics: true };
     persistUser(this.currentUser);
     this.emit(this.currentUser);
     return { success: true, user: this.currentUser };
+  }
+
+  async enrollVoice(audioBlob: Blob): Promise<AuthResult> {
+    if (!this.currentUser) {
+      return {
+        success: false,
+        error: "Active session required.",
+        errorCode: "no-session",
+      };
+    }
+    try {
+      const voiceprint = await extractVoiceprint(audioBlob);
+      voiceprintStore.enroll(this.currentUser.email, voiceprint);
+      this.currentUser = { ...this.currentUser, hasBiometrics: true };
+      persistUser(this.currentUser);
+      this.emit(this.currentUser);
+      return { success: true, user: this.currentUser };
+    } catch (e: any) {
+      return {
+        success: false,
+        error: e?.message || "Voice enrollment failed.",
+        errorCode: "voice-enroll-error",
+      };
+    }
   }
 
   async verifyPasskey(_email?: string): Promise<AuthResult> {

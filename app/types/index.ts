@@ -31,10 +31,16 @@ export interface AuthAdapter {
   login(email: string, passkey: string): Promise<AuthResult>;
   logout(): Promise<AuthResult>;
   resetPassword(email: string): Promise<AuthResult>;
-  verifyFace(imageBase64: string): Promise<AuthResult>;
+  /** Device face auth via WebAuthn platform authenticator (Windows Hello / Face ID). */
+  verifyFace(): Promise<AuthResult>;
+  /** Voice auth via real DSP voiceprint matching against an enrolled sample. */
   verifyVoice(audioBlob: Blob): Promise<AuthResult>;
-  verifyFingerprint(scanData: string): Promise<AuthResult>;
+  /** Device fingerprint auth via WebAuthn platform authenticator (Touch ID / Windows Hello). */
+  verifyFingerprint(): Promise<AuthResult>;
+  /** Enroll device biometric (WebAuthn platform authenticator). */
   enrollBiometrics(userId: string): Promise<AuthResult>;
+  /** Enroll a voiceprint from a recorded sample. */
+  enrollVoice(audioBlob: Blob): Promise<AuthResult>;
   verifyPasskey(email?: string): Promise<AuthResult>;
   getCurrentUser(): Promise<UserProfile | null>;
   onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void;

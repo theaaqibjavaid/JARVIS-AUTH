@@ -1,5 +1,5 @@
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import React, { type ReactNode } from "react";
 import {
   AuthProvider,
@@ -9,6 +9,41 @@ import {
   MockAuthAdapter,
   __resetMockAdapterStateForTests,
 } from "@/app/lib/auth-adapter";
+import {
+  enrollPlatformBiometric,
+  verifyPlatformBiometric,
+} from "@/app/lib/webauthn-biometrics";
+import { extractVoiceprint } from "@/app/lib/voiceprint";
+
+// Keep the real credential/voiceprint stores but stub the OS biometric
+// prompt + audio DSP at the seam so tests never touch real hardware.
+vi.mock("@/app/lib/webauthn-biometrics", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/app/lib/webauthn-biometrics")>();
+  return {
+    ...actual,
+    enrollPlatformBiometric: vi.fn(),
+    verifyPlatformBiometric: vi.fn(),
+  };
+});
+
+vi.mock("@/app/lib/voiceprint", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/app/lib/voiceprint")>();
+  return {
+    ...actual,
+    extractVoiceprint: vi.fn(),
+  };
+});
+
+const mockedEnrollPlatform = vi.mocked(enrollPlatformBiometric);
+const mockedVerifyPlatform = vi.mocked(verifyPlatformBiometric);
+const mockedExtractVoiceprint = vi.mocked(extractVoiceprint);
+
+const fixedVoiceprint = () => {
+  const v = new Float32Array(26);
+  for (let i = 0; i < v.length; i++) v[i] = 1 + i * 0.01;
+  return v;
+};
 
 const wrapper = ({ children }: { children: ReactNode }) => {
   __resetMockAdapterStateForTests();
@@ -24,6 +59,9 @@ const STORAGE_KEY = "jarvis_auth_user";
 describe("AuthContext (useAuth hook)", () => {
   beforeEach(() => {
     window.localStorage.removeItem(STORAGE_KEY);
+    mockedEnrollPlatform.mockReset();
+    mockedVerifyPlatform.mockReset();
+    mockedExtractVoiceprint.mockReset();
   });
   afterEach(() => {
     window.localStorage.removeItem(STORAGE_KEY);
@@ -164,11 +202,17 @@ describe("AuthContext (useAuth hook)", () => {
   });
 
   it("enrollBiometrics fails without active session then succeeds after login", async () => {
+    mockedEnrollPlatform.mockResolvedValue({
+      success: true,
+      email: "e@e.ee",
+      credentialId: "cred-ctx",
+    });
     const { result } = renderHook(() => useAuth(), { wrapper });
     await act(async () => {
       await result.current.enrollBiometrics();
     });
     expect(result.current.modal.isSuccess).toBe(false);
+    expect(mockedEnrollPlatform).not.toHaveBeenCalled();
     act(() => result.current.closeModal());
     await act(async () => {
       await result.current.login("e@e.ee", "password1");
@@ -183,6 +227,11 @@ describe("AuthContext (useAuth hook)", () => {
   });
 
   it("hasBiometrics persists through logout/login round-trip (Bug-02 regression)", async () => {
+    mockedEnrollPlatform.mockResolvedValue({
+      success: true,
+      email: "bio@persist.io",
+      credentialId: "cred-persist",
+    });
     const { result } = renderHook(() => useAuth(), { wrapper });
     await act(async () => {
       await result.current.register("bio@persist.io", "password1", "Bio Tester");
@@ -214,27 +263,58 @@ describe("AuthContext (useAuth hook)", () => {
   });
 
   it("verifyFace/verifyVoice/verifyFingerprint auto-authenticate", async () => {
+    // Face: real platform assertion → session
+    mockedVerifyPlatform.mockResolvedValue({
+      success: true,
+      email: "face@ctx.io",
+      credentialId: "cred-face",
+    });
     const { result } = renderHook(() => useAuth(), { wrapper });
     act(() => result.current.closeModal());
     await act(async () => {
-      await result.current.verifyFace("data:image/jpeg;base64,abc");
+      await result.current.verifyFace();
     });
     expect(result.current.status).toBe("authenticated");
+    expect(result.current.user?.email).toBe("face@ctx.io");
     act(() => result.current.closeModal());
     await act(async () => {
       await result.current.logout();
     });
+
+    // Voice: register first, then login
+    mockedExtractVoiceprint.mockResolvedValue(fixedVoiceprint());
     await act(async () => {
-      await result.current.verifyVoice(new Blob(["voice"]));
+      await result.current.login("voice@ctx.io", "password1");
     });
-    expect(result.current.status).toBe("authenticated");
+    act(() => result.current.closeModal());
+    await act(async () => {
+      await result.current.enrollVoice(new Blob(["sample"]));
+    });
     act(() => result.current.closeModal());
     await act(async () => {
       await result.current.logout();
     });
+    expect(result.current.status).toBe("unauthenticated");
     await act(async () => {
-      await result.current.verifyFingerprint("scandata");
+      await result.current.verifyVoice(new Blob(["probe"]));
     });
     expect(result.current.status).toBe("authenticated");
+    expect(result.current.user?.email).toBe("voice@ctx.io");
+    act(() => result.current.closeModal());
+    await act(async () => {
+      await result.current.logout();
+    });
+
+    // Fingerprint: real platform assertion → session
+    mockedVerifyPlatform.mockResolvedValue({
+      success: true,
+      email: "fp@ctx.io",
+      credentialId: "cred-fp",
+    });
+    await act(async () => {
+      await result.current.verifyFingerprint();
+    });
+    expect(result.current.status).toBe("authenticated");
+    expect(result.current.user?.email).toBe("fp@ctx.io");
   });
 });

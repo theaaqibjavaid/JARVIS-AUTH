@@ -25,10 +25,16 @@ interface AuthAdapter {
     login(email: string, passkey: string): Promise<AuthResult>;
     logout(): Promise<AuthResult>;
     resetPassword(email: string): Promise<AuthResult>;
-    verifyFace(imageBase64: string): Promise<AuthResult>;
+    /** Device face auth via WebAuthn platform authenticator (Windows Hello / Face ID). */
+    verifyFace(): Promise<AuthResult>;
+    /** Voice auth via real DSP voiceprint matching against an enrolled sample. */
     verifyVoice(audioBlob: Blob): Promise<AuthResult>;
-    verifyFingerprint(scanData: string): Promise<AuthResult>;
+    /** Device fingerprint auth via WebAuthn platform authenticator (Touch ID / Windows Hello). */
+    verifyFingerprint(): Promise<AuthResult>;
+    /** Enroll device biometric (WebAuthn platform authenticator). */
     enrollBiometrics(userId: string): Promise<AuthResult>;
+    /** Enroll a voiceprint from a recorded sample. */
+    enrollVoice(audioBlob: Blob): Promise<AuthResult>;
     verifyPasskey(email?: string): Promise<AuthResult>;
     getCurrentUser(): Promise<UserProfile | null>;
     onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void;
@@ -63,10 +69,18 @@ declare class MockAuthAdapter implements AuthAdapter {
     login(email: string, passkey: string): Promise<AuthResult>;
     logout(): Promise<AuthResult>;
     resetPassword(email: string): Promise<AuthResult>;
-    verifyFace(_imageBase64: string): Promise<AuthResult>;
-    verifyVoice(_audioBlob: Blob): Promise<AuthResult>;
-    verifyFingerprint(_scanData: string): Promise<AuthResult>;
-    enrollBiometrics(userId: string): Promise<AuthResult>;
+    /** Resolve a full profile for an email (falls back to a minimal profile). */
+    private resolveUserByEmail;
+    /** Stamp, persist and broadcast an authenticated user. */
+    private commitUser;
+    private markBiometricsEnrolled;
+    /** Shared real WebAuthn platform-biometric login gate (face + fingerprint). */
+    private platformBiometricLogin;
+    verifyFace(): Promise<AuthResult>;
+    verifyVoice(audioBlob: Blob): Promise<AuthResult>;
+    verifyFingerprint(): Promise<AuthResult>;
+    enrollBiometrics(_userId: string): Promise<AuthResult>;
+    enrollVoice(audioBlob: Blob): Promise<AuthResult>;
     verifyPasskey(_email?: string): Promise<AuthResult>;
     getCurrentUser(): Promise<UserProfile | null>;
     onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void;
@@ -83,10 +97,13 @@ declare class BackendAuthAdapter implements AuthAdapter {
     login(email: string, passkey: string): Promise<AuthResult>;
     logout(): Promise<AuthResult>;
     resetPassword(email: string): Promise<AuthResult>;
-    verifyFace(imageBase64: string): Promise<AuthResult>;
+    /** Establish a session with the backend after a successful local biometric gate. */
+    private biometricLogin;
+    verifyFace(): Promise<AuthResult>;
     verifyVoice(audioBlob: Blob): Promise<AuthResult>;
-    verifyFingerprint(_scanData: string): Promise<AuthResult>;
+    verifyFingerprint(): Promise<AuthResult>;
     enrollBiometrics(_userId: string): Promise<AuthResult>;
+    enrollVoice(audioBlob: Blob): Promise<AuthResult>;
     verifyPasskey(_email?: string): Promise<AuthResult>;
     getCurrentUser(): Promise<UserProfile | null>;
     onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void;
@@ -111,10 +128,11 @@ interface AuthContextValue {
     register: (email: string, passkey: string, fullName: string) => Promise<void>;
     logout: () => Promise<void>;
     resetPassword: (email: string) => Promise<void>;
-    verifyFace: (imageBase64: string) => Promise<void>;
+    verifyFace: () => Promise<void>;
     verifyVoice: (audioBlob: Blob) => Promise<void>;
-    verifyFingerprint: (scanData: string) => Promise<void>;
+    verifyFingerprint: () => Promise<void>;
     enrollBiometrics: () => Promise<void>;
+    enrollVoice: (audioBlob: Blob) => Promise<void>;
     verifyPasskey: () => Promise<AuthResult>;
     setActiveMethod: (method: BiometricMethod) => void;
     toggleMode: () => void;
@@ -152,10 +170,39 @@ declare function CanvasBackground(): react.JSX.Element;
 
 declare function PasskeyForm(): react.JSX.Element;
 
+/**
+ * Real device face authentication.
+ *
+ * This does NOT do a fake camera capture. It invokes the OS-level WebAuthn
+ * platform authenticator (Windows Hello / Face ID), which owns the camera and
+ * performs the genuine biometric match. The raw face data never reaches this
+ * app — the OS returns a signed cryptographic assertion instead.
+ */
 declare function FacialScanner(): react.JSX.Element;
 
-declare function VoiceScanner(): react.JSX.Element;
+interface VoiceScannerProps {
+    /**
+     * "enroll" extracts and stores a new voiceprint for the signed-in user.
+     * "verify" extracts a probe voiceprint and matches it against enrolled ones.
+     */
+    mode?: "enroll" | "verify";
+}
+/**
+ * Real voice authentication using client-side DSP.
+ *
+ * Records a genuine microphone sample, extracts an MFCC voiceprint entirely on
+ * device, and either stores it (enroll) or matches it 1:N against enrolled
+ * voiceprints (verify). No audio or voiceprint ever leaves the device.
+ */
+declare function VoiceScanner({ mode }: VoiceScannerProps): react.JSX.Element;
 
+/**
+ * Real device fingerprint authentication.
+ *
+ * This does NOT fabricate a scan string. It invokes the OS-level WebAuthn
+ * platform authenticator (Windows Hello fingerprint / Touch ID), which owns the
+ * sensor and performs the genuine match. The raw print never leaves the device.
+ */
 declare function FingerprintPad(): react.JSX.Element;
 
 export { type AccessModalState, ArcReactorHud, type AuthAdapter, type AuthAdapterName, type AuthContextValue, AuthPortal, AuthProvider, type AuthResult, type AuthStatus, BackendAuthAdapter, type BiometricMethod, CanvasBackground, type ClearanceLevel, FacialScanner, FingerprintPad, MockAuthAdapter, PasskeyForm, SoundEngine, type TelemetryData, type TerminalMessage, type UserProfile, VoiceScanner, __resetMockAdapterStateForTests, createAuthAdapter, useAuth };

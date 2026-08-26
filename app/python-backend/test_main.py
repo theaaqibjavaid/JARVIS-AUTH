@@ -20,7 +20,7 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
 # Set test env vars before importing the app
-os.environ["JARVIS_JWT_SECRET"] = "test-secret-for-ci"
+os.environ["JARVIS_JWT_SECRET"] = "test-secret-for-ci-0123456789abcdef"
 os.environ["JARVIS_DB_URL"] = "sqlite:///test_jarvis_auth.db"
 
 from main import app, create_db_and_tables, engine  # noqa: E402
@@ -121,10 +121,7 @@ async def test_login_invalid_credentials(client: AsyncClient):
 
 
 async def test_protected_endpoint_requires_bearer_token(client: AsyncClient):
-    response = await client.post(
-        "/api/v1/auth/verify-fingerprint",
-        data={"scan_data": "fake-scan"},
-    )
+    response = await client.post("/api/v1/auth/refresh")
     assert response.status_code == 401
     assert "bearer token" in response.json()["detail"].lower()
 
@@ -137,9 +134,31 @@ async def test_protected_endpoint_valid_token(client: AsyncClient):
     token = reg.json()["token"]["access_token"]
 
     response = await client.post(
-        "/api/v1/auth/verify-fingerprint",
-        data={"scan_data": "valid-fingerprint-data"},
+        "/api/v1/auth/refresh",
         headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "access_token" in data
+
+
+# ---------------------------------------------------------------------------
+# Biometric enrollment + login (real register-first-then-login flow)
+# ---------------------------------------------------------------------------
+async def _register(client: AsyncClient, email: str = "vision@avengers.io") -> dict:
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "passkey": "synthezoid", "full_name": "Vision"},
+    )
+    assert reg.status_code == 201
+    return reg.json()
+
+
+async def test_enroll_biometric_success(client: AsyncClient):
+    await _register(client)
+    response = await client.post(
+        "/api/v1/auth/enroll-biometric",
+        json={"email": "vision@avengers.io", "credential_id": "cred-abc123"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -147,26 +166,128 @@ async def test_protected_endpoint_valid_token(client: AsyncClient):
     assert data["user"]["hasBiometrics"] is True
 
 
-async def test_webauthn_options(client: AsyncClient):
-    await client.post(
-        "/api/v1/auth/register",
-        json={"email": "vision@avengers.io", "passkey": "synthezoid", "full_name": "Vision"},
-    )
-    response = await client.get(
-        "/api/v1/auth/webauthn/options",
-        params={"email": "vision@avengers.io"},
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert "challenge" in data
-    assert data["rpName"] == "J.A.R.V.I.S."
-    assert data["rpId"] == "localhost"
-
-
-async def test_webauthn_options_user_not_found(client: AsyncClient):
-    response = await client.get(
-        "/api/v1/auth/webauthn/options",
-        params={"email": "ghost@nowhere.io"},
+async def test_enroll_biometric_user_not_found(client: AsyncClient):
+    response = await client.post(
+        "/api/v1/auth/enroll-biometric",
+        json={"email": "ghost@nowhere.io", "credential_id": "cred-xyz"},
     )
     assert response.status_code == 404
     assert "User not found" in response.json()["detail"]
+
+
+async def test_biometric_login_requires_prior_enrollment(client: AsyncClient):
+    # Register but do NOT enroll biometrics -> login must be refused.
+    await _register(client, email="fresh@avengers.io")
+    response = await client.post(
+        "/api/v1/auth/biometric-login",
+        json={"email": "fresh@avengers.io", "method": "voice"},
+    )
+    assert response.status_code == 401
+    assert "not enrolled" in response.json()["detail"]
+
+
+async def test_biometric_login_face_success(client: AsyncClient):
+    await _register(client)
+    await client.post(
+        "/api/v1/auth/enroll-biometric",
+        json={"email": "vision@avengers.io", "credential_id": "cred-face-1"},
+    )
+    response = await client.post(
+        "/api/v1/auth/biometric-login",
+        json={
+            "email": "vision@avengers.io",
+            "method": "face",
+            "credential_id": "cred-face-1",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["user"]["email"] == "vision@avengers.io"
+    assert data["user"]["lastLoginAt"] is not None
+    assert data["token"]["access_token"]
+    assert data["token"]["refresh_token"]
+
+
+async def test_biometric_login_fingerprint_success(client: AsyncClient):
+    await _register(client)
+    await client.post(
+        "/api/v1/auth/enroll-biometric",
+        json={"email": "vision@avengers.io", "credential_id": "cred-fp-1"},
+    )
+    response = await client.post(
+        "/api/v1/auth/biometric-login",
+        json={
+            "email": "vision@avengers.io",
+            "method": "fingerprint",
+            "credential_id": "cred-fp-1",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+
+async def test_biometric_login_voice_success(client: AsyncClient):
+    # Voice matching happens on-device; the server only needs prior enrollment.
+    await _register(client)
+    await client.post(
+        "/api/v1/auth/enroll-biometric",
+        json={"email": "vision@avengers.io", "credential_id": "cred-voice-1"},
+    )
+    response = await client.post(
+        "/api/v1/auth/biometric-login",
+        json={"email": "vision@avengers.io", "method": "voice"},
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+
+async def test_biometric_login_unknown_user(client: AsyncClient):
+    response = await client.post(
+        "/api/v1/auth/biometric-login",
+        json={"email": "ghost@nowhere.io", "method": "voice"},
+    )
+    assert response.status_code == 401
+    assert "Invalid biometric credential" in response.json()["detail"]
+
+
+async def test_biometric_login_credential_not_bound(client: AsyncClient):
+    await _register(client)
+    await client.post(
+        "/api/v1/auth/enroll-biometric",
+        json={"email": "vision@avengers.io", "credential_id": "cred-real"},
+    )
+    # Present a credential id that was never bound to this operative.
+    response = await client.post(
+        "/api/v1/auth/biometric-login",
+        json={
+            "email": "vision@avengers.io",
+            "method": "fingerprint",
+            "credential_id": "cred-forged",
+        },
+    )
+    assert response.status_code == 401
+    assert "not bound" in response.json()["detail"]
+
+
+async def test_biometric_login_device_method_requires_credential_id(client: AsyncClient):
+    await _register(client)
+    await client.post(
+        "/api/v1/auth/enroll-biometric",
+        json={"email": "vision@avengers.io", "credential_id": "cred-1"},
+    )
+    response = await client.post(
+        "/api/v1/auth/biometric-login",
+        json={"email": "vision@avengers.io", "method": "face"},
+    )
+    assert response.status_code == 400
+    assert "credential_id" in response.json()["detail"]
+
+
+async def test_biometric_login_invalid_method_rejected(client: AsyncClient):
+    await _register(client)
+    response = await client.post(
+        "/api/v1/auth/biometric-login",
+        json={"email": "vision@avengers.io", "method": "iris"},
+    )
+    assert response.status_code == 422
