@@ -10,14 +10,14 @@ Security features:
 
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 import bcrypt
 import jwt
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -54,10 +54,18 @@ limiter = Limiter(
     headers_enabled=True,
 )
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Create database tables on startup (replaces deprecated on_event hook).
+    create_db_and_tables()
+    yield
+
+
 app = FastAPI(
     title="J.A.R.V.I.S. Auth Core API",
     version="1.0.0",
     description="Industry-grade pluggable authentication backend for the JARVIS security suite.",
+    lifespan=lifespan,
 )
 
 app.state.limiter = limiter
@@ -122,8 +130,15 @@ class LoginRequest(BaseModel):
     passkey: str = Field(min_length=6)
 
 
-class FaceVerifyRequest(BaseModel):
-    image_base64: str
+class BiometricLoginRequest(BaseModel):
+    email: EmailStr
+    method: str = Field(pattern="^(face|voice|fingerprint)$")
+    credential_id: Optional[str] = None
+
+
+class EnrollBiometricRequest(BaseModel):
+    email: EmailStr
+    credential_id: str = Field(min_length=1)
 
 
 class TokenResponse(BaseModel):
@@ -231,11 +246,6 @@ def to_user_response(user: User) -> UserProfileResponse:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
-@app.on_event("startup")
-def on_startup():
-    create_db_and_tables()
-
-
 @app.get("/api/v1/health")
 @limiter.limit("60/minute")
 def health(request: Request):
@@ -317,137 +327,104 @@ def refresh_token(
     return TokenResponse(access_token=access_token, refresh_token="")
 
 
-@app.post("/api/v1/auth/verify-face")
-@limiter.limit("20/minute")
-def verify_face(
-    request: Request,
-    req: FaceVerifyRequest,
-    session: Annotated[Session, Depends(get_session)],
-    current: Annotated[User, Depends(get_current_user)],
-):
-    if not req.image_base64:
-        raise HTTPException(status_code=400, detail="Missing base64 frame stream")
-
-    current.has_biometrics = True
-    session.add(current)
-    session.commit()
-    session.refresh(current)
-
-    access_token = create_access_token({"sub": current.uid, "email": current.email})
-    return AuthResponse(
-        success=True,
-        user=to_user_response(current),
-        token=TokenResponse(access_token=access_token, refresh_token=""),
-    )
-
-
-@app.post("/api/v1/auth/verify-voice")
-@limiter.limit("20/minute")
-def verify_voice(
-    request: Request,
-    session: Annotated[Session, Depends(get_session)],
-    current: Annotated[User, Depends(get_current_user)],
-    file: UploadFile = File(...),
-):
-    contents = file.file.read()
-    if len(contents) == 0:
-        raise HTTPException(status_code=400, detail="Empty audio payload")
-
-    current.has_biometrics = True
-    session.add(current)
-    session.commit()
-    session.refresh(current)
-
-    access_token = create_access_token({"sub": current.uid, "email": current.email})
-    return AuthResponse(
-        success=True,
-        user=to_user_response(current),
-        token=TokenResponse(access_token=access_token, refresh_token=""),
-    )
-
-
-@app.post("/api/v1/auth/verify-fingerprint")
-@limiter.limit("20/minute")
-def verify_fingerprint(
-    request: Request,
-    session: Annotated[Session, Depends(get_session)],
-    current: Annotated[User, Depends(get_current_user)],
-    scan_data: str = Form(...),
-):
-    if not scan_data:
-        raise HTTPException(status_code=400, detail="Missing fingerprint scan data")
-
-    current.has_biometrics = True
-    session.add(current)
-    session.commit()
-    session.refresh(current)
-
-    access_token = create_access_token({"sub": current.uid, "email": current.email})
-    return AuthResponse(
-        success=True,
-        user=to_user_response(current),
-        token=TokenResponse(access_token=access_token, refresh_token=""),
-    )
-
-
-@app.get("/api/v1/auth/webauthn/options")
+@app.post("/api/v1/auth/enroll-biometric")
 @limiter.limit("10/minute")
-def webauthn_options(
+def enroll_biometric(
     request: Request,
-    email: str,
+    req: EnrollBiometricRequest,
     session: Annotated[Session, Depends(get_session)],
 ):
-    user = session.exec(select(User).where(User.email == email.lower())).first()
+    """Persist a device-biometric credential binding for an operative.
+
+    Called after the client completes the real OS biometric enrollment
+    (Windows Hello / Touch ID / Face ID via the WebAuthn platform
+    authenticator). The raw biometric never reaches the server — only the
+    credential id produced by the OS authenticator is stored.
+    """
+    user = session.exec(select(User).where(User.email == req.email.lower())).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # In production, generate a cryptographically random challenge
-    challenge = uuid.uuid4().hex
+    # Avoid duplicate bindings for the same credential id.
+    existing = session.exec(
+        select(Passkey).where(Passkey.credential_id == req.credential_id)
+    ).first()
+    if not existing:
+        session.add(
+            Passkey(user_uid=user.uid, credential_id=req.credential_id, public_key="platform")
+        )
 
-    return {
-        "challenge": challenge,
-        "rpId": "localhost",
-        "rpName": "J.A.R.V.I.S.",
-        "userId": user.uid,
-        "userEmail": user.email,
-        "userName": user.full_name,
-        "timeout": 60000,
-        "attestation": "none",
-        "pubKeyCredParams": [
-            {"type": "public-key", "alg": -7},
-            {"type": "public-key", "alg": -257},
-        ],
-    }
-
-
-@app.post("/api/v1/auth/webauthn/verify")
-@limiter.limit("10/minute")
-def webauthn_verify(
-    request: Request,
-    credential: dict,
-    session: Annotated[Session, Depends(get_session)],
-):
-    # In production, use @simplewebauthn/server to verify the assertion
-    credential_id = credential.get("id", "")
-    stored = session.exec(select(Passkey).where(Passkey.credential_id == credential_id)).first()
-
-    if not stored:
-        raise HTTPException(status_code=404, detail="Credential not found")
-
-    stored.sign_count += 1
-    session.add(stored)
+    user.has_biometrics = True
+    session.add(user)
     session.commit()
+    session.refresh(user)
 
-    user = session.exec(select(User).where(User.uid == stored.user_uid)).first()
+    return AuthResponse(success=True, user=to_user_response(user), token=None)
+
+
+@app.post("/api/v1/auth/biometric-login")
+@limiter.limit("20/minute")
+def biometric_login(
+    request: Request,
+    req: BiometricLoginRequest,
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Establish a session after the client passes its local biometric gate.
+
+    The biometric match itself is enforced on the device: an OS-level WebAuthn
+    platform authenticator for face/fingerprint, and an on-device DSP
+    voiceprint for voice. The server's responsibilities are to (1) refuse login
+    unless the operative has previously enrolled biometrics ("register first,
+    then login"), (2) for device biometrics, verify the presented credential id
+    is actually bound to the claimed operative, and (3) issue tokens.
+    """
+    user = session.exec(select(User).where(User.email == req.email.lower())).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid biometric credential"
+        )
+
+    # Register-first: biometric login is only allowed after enrollment.
+    if not user.has_biometrics:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Biometrics not enrolled for this operative",
+        )
+
+    # Device biometrics must present a credential bound to this operative.
+    if req.method in ("face", "fingerprint"):
+        if not req.credential_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing credential_id for device biometric",
+            )
+        stored = session.exec(
+            select(Passkey).where(
+                Passkey.credential_id == req.credential_id,
+                Passkey.user_uid == user.uid,
+            )
+        ).first()
+        if not stored:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Credential not bound to this operative",
+            )
+        stored.sign_count += 1
+        session.add(stored)
+
+    user.last_login_at = datetime.now(timezone.utc).isoformat()
+    session.add(user)
+    session.commit()
+    session.refresh(user)
 
     access_token = create_access_token({"sub": user.uid, "email": user.email})
-    return {
-        "success": True,
-        "user": to_user_response(user),
-        "token": TokenResponse(access_token=access_token, refresh_token=""),
-    }
+    refresh_token = create_refresh_token({"sub": user.uid})
+
+    return AuthResponse(
+        success=True,
+        user=to_user_response(user),
+        token=TokenResponse(access_token=access_token, refresh_token=refresh_token),
+    )
 
 
 if __name__ == "__main__":
