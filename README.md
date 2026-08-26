@@ -5,7 +5,7 @@
 **Iron Man–style pluggable multi-biometric authentication — drop into any React / Next.js app**
 
 <a href="https://github.com/theaaqibjavaid/JARVIS-AUTH/actions"><img src="https://github.com/theaaqibjavaid/JARVIS-AUTH/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-[![Tests](https://img.shields.io/badge/tests-64%20passed-brightgreen)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-137%20passed-brightgreen)](#-testing)
 [![npm](https://img.shields.io/npm/v/@jarvis-security/sdk?label=%40jarvis-security%2Fsdk)](https://www.npmjs.com/package/@jarvis-security/sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-cyan.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](./tsconfig.json)
@@ -23,7 +23,9 @@
 
 | Layer | What you get |
 |---|---|
-| 🔐 **4 Biometric Methods** | Passkey (password) · Facial scan (real camera) · Voice print (real mic) · Fingerprint (press & hold) |
+| 🔐 **4 Real Biometric Methods** | Passkey (password + device passkey) · Face (Windows Hello / Face ID) · Voice (on-device DSP voiceprint) · Fingerprint (Touch ID / Windows Hello) — **register first, then login** |
+| 🧬 **Real Device Biometrics** | Face & fingerprint use the **WebAuthn platform authenticator** — the OS verifies the biometric, raw data never leaves the device |
+| 🎙️ **Real Voice Recognition** | Client-side **MFCC voiceprint** engine (FFT → mel filterbank → DCT → cosine similarity) — fully offline, no audio ever uploaded |
 | 🗝️ **WebAuthn Passkeys** | Real device passkey sign-in via `@simplewebauthn/browser` with feature detection |
 | 🔌 **Pluggable Backends** | **Strategy / Adapter Pattern** — Mock (demo) · FastAPI REST · Firebase (skeleton) · write your own for Supabase, Auth0, Clerk... |
 | 🛡️ **Hardened Backend** | FastAPI with bcrypt hashing, JWT access + refresh tokens, CORS, rate limiting (slowapi), SQLModel/SQLite persistence |
@@ -32,7 +34,7 @@
 | 🏠 **Persistence** | Session survives reload via `localStorage` (`jarvis_auth_user`) + `onAuthStateChanged` observable subscription pattern |
 | ♿ **Accessibility** | `aria-*` labels, `htmlFor`/`id` bindings, keyboard support (Space/Enter), `prefers-reduced-motion` support |
 | 📱 **Responsive** | 12-col Tailwind grid collapses gracefully on tablet + mobile |
-| ✅ **Fully Tested** | 64 unit tests (Vitest + Testing Library) + 10 FastAPI backend tests (pytest) |
+| ✅ **Fully Tested** | 119 unit tests (Vitest + Testing Library) + 18 FastAPI backend tests (pytest) |
 | 🔧 **Zero config demo** | `npm run dev` → works out of the box with `MockAuthAdapter` (no backends needed) |
 
 ---
@@ -61,7 +63,16 @@ Try these:
 |---|---|
 | Email | `stark@avengers.io` |
 | Passkey | `iamironman` |
-| Or click **FACIAL/EYE** / **VOICE** / **FINGERPRINT SCAN** buttons | — |
+
+**Biometrics are real — register first, then login:**
+
+| Method | Enroll | Login |
+|---|---|---|
+| 🧑 **Face** | Dashboard → *Enroll Biometrics* → OS face prompt (Windows Hello / Face ID) | Face panel → OS verifies your face |
+| 🎙️ **Voice** | Voice panel → *ENROLL VOICEPRINT* → speak the phrase | Voice panel → *VERIFY* → speak again → DSP match |
+| 👆 **Fingerprint** | Dashboard → *Enroll Biometrics* → touch the sensor | Fingerprint panel → touch the sensor |
+
+> Face & fingerprint are enforced by your **OS** via the WebAuthn platform authenticator (no sensor data ever reaches the app). Voice matching runs **100% on-device** (MFCC voiceprint + cosine similarity).
 
 ### Production build
 
@@ -194,24 +205,32 @@ NEXT_PUBLIC_AUTH_API_URL=http://localhost:8000
 
 ### ✍️ Write a custom adapter
 
-Just **implement the `AuthAdapter` interface** — that's the only rule. The contract has 11 methods:
+Just **implement the `AuthAdapter` interface** — that's the only rule. The contract has 12 methods:
 
 ```ts
 interface AuthAdapter {
   readonly name: string;
-  register(email: string, passkey: string, fullName?: string): Promise<AuthResult>;
+  register(email: string, passkey: string, fullName: string): Promise<AuthResult>;
   login(email: string, passkey: string): Promise<AuthResult>;
-  logout(): Promise<void>;
+  logout(): Promise<AuthResult>;
   resetPassword(email: string): Promise<AuthResult>;
-  verifyFace(imageBase64: string): Promise<AuthResult>;
+  /** Device face auth via WebAuthn platform authenticator (Windows Hello / Face ID). */
+  verifyFace(): Promise<AuthResult>;
+  /** Voice auth via real DSP voiceprint matching against an enrolled sample. */
   verifyVoice(audioBlob: Blob): Promise<AuthResult>;
-  verifyFingerprint(scanData: string): Promise<AuthResult>;
-  verifyPasskey(email?: string): Promise<AuthResult>;
+  /** Device fingerprint auth via WebAuthn platform authenticator (Touch ID / Windows Hello). */
+  verifyFingerprint(): Promise<AuthResult>;
+  /** Enroll device biometric (WebAuthn platform authenticator). */
   enrollBiometrics(userId: string): Promise<AuthResult>;
+  /** Enroll a voiceprint from a recorded sample. */
+  enrollVoice(audioBlob: Blob): Promise<AuthResult>;
+  verifyPasskey(email?: string): Promise<AuthResult>;
   getCurrentUser(): Promise<UserProfile | null>;
   onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void;
 }
 ```
+
+> **v2.0.0 breaking change:** `verifyFace()` / `verifyFingerprint()` no longer accept payloads — the OS biometric prompt is triggered internally. Biometrics follow **register-first-then-login**: call `enrollBiometrics()` / `enrollVoice()` before verifying.
 
 Example (Supabase):
 
@@ -255,7 +274,7 @@ A production-hardened backend lives in [app/python-backend/](./app/python-backen
 | Rate limiting | **slowapi** — 5/min register, 10/min login, 30/min default |
 | Storage | **SQLModel + SQLite** (swap to Postgres via `JARVIS_DB_URL`) |
 | CORS | Configurable via `JARVIS_CORS_ORIGINS` |
-| WebAuthn | Passkey options / verify / register endpoints |
+| Device biometrics | Register-first enrollment + biometric login with per-user credential binding (`Passkey` table) |
 
 ### Run it
 
@@ -283,41 +302,46 @@ uvicorn main:app --reload --port 8000
 | `POST` | `/api/v1/auth/register` | 5/min |
 | `POST` | `/api/v1/auth/login` | 10/min |
 | `POST` | `/api/v1/auth/refresh` | 30/min |
-| `POST` | `/api/v1/auth/verify-face` | 20/min |
-| `POST` | `/api/v1/auth/verify-voice` | 20/min |
-| `POST` | `/api/v1/auth/verify-fingerprint` | 20/min |
-| `GET` | `/api/v1/auth/webauthn/options` | 10/min |
-| `POST` | `/api/v1/auth/webauthn/verify` | 10/min |
+| `POST` | `/api/v1/auth/enroll-biometric` | 10/min |
+| `POST` | `/api/v1/auth/biometric-login` | 20/min |
+
+**Biometric model:** the real biometric gate happens on the device (OS platform authenticator for face/fingerprint, DSP voiceprint for voice). The backend then (1) refuses `biometric-login` unless the operative has enrolled, and (2) for face/fingerprint verifies the presented `credential_id` is bound to the claimed user before issuing JWTs.
 
 ---
 
 ## 🧪 Testing
 
-### Frontend — 64 tests
+### Frontend — 119 tests
 
 ```bash
-npm test              # run all tests once
-npm run test:watch    # watch mode
-npm run test:coverage # with v8 coverage (60% thresholds)
+npm test          # watch mode
+npm run test:run  # single run
+npm run coverage  # with coverage report
 ```
 
-| Suite | Tests | Covers |
-|---|---|---|
-| `auth-adapter.test.ts` | 31 | MockAuthAdapter register/login/logout/reset, biometric verify, enrollBiometrics persistence, onAuthStateChanged, verifyPasskey, factory, BackendAuthAdapter |
-| `auth-context.test.tsx` | 14 | AuthProvider init, login/register flows, logout, mode/audio toggles, modal, biometric enrollment round-trip |
-| `types.test.ts` | 7 | AuthAdapter interface contract (11 methods), type shapes |
-| `sound-engine.test.ts` | 7 | Web Audio beep/success/error synthesis |
-| `PasskeyForm.test.tsx` | 5 | Form rendering, validation, passkey visibility toggle |
+| Suite | Tests |
+|---|---|
+| `auth-adapter.test.ts` | 40 |
+| `voiceprint.test.ts` | 25 |
+| `webauthn-biometrics.test.ts` | 21 |
+| `auth-context.test.tsx` | 14 |
+| `types.test.ts` | 7 |
+| `sound-engine.test.ts` | 7 |
+| `PasskeyForm.test.tsx` | 5 |
 
-### Backend — 10 tests
+Coverage thresholds enforced: **lines 60% · branches 50% · functions 60% · statements 60%**
+
+The biometric engines are tested for real: `voiceprint.test.ts` exercises the full DSP pipeline (FFT, mel filterbank, MFCC, cosine matching, voiceprint store) and `webauthn-biometrics.test.ts` covers credential options building, enrollment, and scoped authentication against a stubbed OS authenticator.
+
+### Backend — 18 tests
 
 ```bash
 cd app/python-backend
 pip install -r requirements.txt
-pytest -v
+pytest test_main.py -v --asyncio-mode=auto
 ```
 
-Covers health, register, duplicate-email conflict, login, wrong-passkey rejection, JWT-protected refresh, face/voice/fingerprint verify, and WebAuthn options.
+Covers: health check, register, login, duplicate rejection, JWT refresh, biometric enrollment, register-first biometric login (face / voice / fingerprint), credential-binding rejection, rate limiting.
 
 ---
 
@@ -332,12 +356,14 @@ jarvis-security-suite/              ← npm project root
 │   │   ├── CanvasBackground.tsx        starfield particles + 40 px grid (pure canvas)
 │   │   └── biometrics/
 │   │       ├── PasskeyForm.tsx         email + passkey + fullName + WebAuthn button
-│   │       ├── FacialScanner.tsx       getUserMedia + laser + base64 capture
-│   │       ├── VoiceScanner.tsx        MediaRecorder + 24-bar waveform
-│   │       └── FingerprintPad.tsx      press-hold conic-gradient ring
+│   │       ├── FacialScanner.tsx       Face auth via WebAuthn platform authenticator
+│   │       ├── VoiceScanner.tsx        Voice enroll/verify via real DSP voiceprint
+│   │       └── FingerprintPad.tsx      Fingerprint auth via WebAuthn platform authenticator
 │   ├── context/AuthContext.tsx         AuthProvider + useAuth() hook
 │   ├── lib/
 │   │   ├── auth-adapter.ts             Mock · Backend · Firebase (Strategy classes)
+│   │   ├── webauthn-biometrics.ts      Real WebAuthn platform authenticator engine (face/fingerprint)
+│   │   ├── voiceprint.ts               Real MFCC DSP voiceprint engine (voice)
 │   │   └── sound-engine.ts             Web Audio synth: beep / success / error
 │   ├── types/index.ts                  ALL shared types + AuthAdapter interface
 │   ├── python-backend/                 Hardened FastAPI backend + pytest suite
@@ -345,7 +371,7 @@ jarvis-security-suite/              ← npm project root
 │   ├── globals.css                     fonts + cyber-* classes + scanlines + keyframes
 │   ├── layout.tsx                      Next.js root HTML shell + metadata
 │   └── page.tsx                        HOME = AuthProvider + Canvas + AuthPortal
-├── __tests__/                          Vitest test suites (64 tests)
+├── __tests__/                          Vitest test suites (119 tests, 7 suites)
 ├── .github/workflows/ci.yml            CI: typecheck · lint · test · build-sdk
 ├── docs/                               Task tracking & session history
 ├── .env.example                        adapter env vars
@@ -366,7 +392,9 @@ This is a **UI + adapter framework** — real security comes from whichever `Aut
 | Password hashing | ❌ none (demo only) | ✅ bcrypt (12 rounds) | ✅ your responsibility |
 | HTTPS only | N/A (localhost) | ✅ mandatory in prod | ✅ |
 | JWT tokens | ❌ | ✅ access + refresh (PyJWT HS256) | ✅ implement |
-| Rate limiting | ❌ | ✅ slowapi per-endpoint limits | ✅ in your backend |
+| Rate limiting | ❌ | ✅ slowapi per-endpoint limits (20/min biometric login) | ✅ in your backend |
+| Face / fingerprint biometrics | ✅ OS-enforced via WebAuthn platform authenticator | ✅ + server-side credential binding & register-first enforcement | ✅ implement |
+| Voice biometrics | ✅ on-device DSP voiceprint (audio never uploaded) | ✅ + server-side register-first enforcement | ✅ implement |
 | WebAuthn passkeys | ⚠️ feature-detected, needs server | ✅ options/verify/register endpoints | ✅ implement |
 | Input validation | Client-side only | ✅ Pydantic schemas | ✅ |
 

@@ -7,25 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [2.0.0] - 2026-08-26
+
+The "no more toy" release — every biometric method now performs **real verification** with a **register-first-then-login** model. Published to npm as `@jarvis-security/sdk@2.0.0`.
+
 ### Added
-- `@jarvis-security/sdk` NPM package with dual CJS/ESM output, TypeScript declarations, and subpath exports
-- Barrel entry point (`app/index.ts`) exporting all SDK modules: auth adapters, context, components, types, and sound engine
-- `tsup.config.ts` for root-level SDK build targeting `app/index.ts`, output to `dist/`
-- `tsconfig.sdk.json` for isolated SDK DTS generation
-- OSS documentation: `LICENSE`, `CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, CI workflow
-- `peerDependencies` for React (v18+) — framework-agnostic at peer level
-- `files: ["dist"]` field to publish only compiled output to NPM
 
-### Fixed
-- **P0 BUG**: Form permanently locked into "AUTHENTICATING..." loading state on dev server start — root cause was dual failure in `onAuthStateChanged()` (adapter) and AuthContext init `useEffect` both guarding on truthy `currentUser`/`user`. Removed both guards and added a 5s `setTimeout` failsafe watchdog
-- **Bug-02**: `enrollBiometrics()` now syncs `hasBiometrics: true` back to the module-level `DEMO_USERS` map, not just localStorage — persistence now survives full logout/login round-trips
-- `esbuild` allowScripts entry updated for v0.27.7 postinstall script
-- `styled-jsx` `<style jsx global>` type error in `AuthPortal.tsx` replaced with standard `dangerouslySetInnerHTML` for SDK compatibility
+- **Real face & fingerprint biometrics** — new `app/lib/webauthn-biometrics.ts` engine drives the **WebAuthn platform authenticator** (Windows Hello, Face ID, Touch ID). The OS verifies the biometric; raw sensor data never leaves the device. Credentials are stored per-email with signature-count tracking.
+- **Real voice recognition** — new `app/lib/voiceprint.ts` engine: client-side MFCC DSP pipeline (pre-emphasis → Hamming → radix-2 FFT → mel filterbank → log → DCT) aggregated into a 26-dim voiceprint, matched via cosine similarity (threshold 0.82). Fully offline — audio is never uploaded.
+- **`enrollVoice(audioBlob)`** added to the `AuthAdapter` interface — voiceprints must be enrolled before voice login works.
+- **Backend biometric endpoints** — `POST /api/v1/auth/enroll-biometric` (10/min) binds a platform credential to the operative; `POST /api/v1/auth/biometric-login` (20/min) refuses login unless biometrics are enrolled and, for face/fingerprint, verifies the presented `credential_id` is bound to the claimed user before issuing JWTs.
+- **VoiceScanner dual-mode UI** — ENROLL VOICEPRINT / VERIFY modes with real microphone recording.
+- **FacialScanner & FingerprintPad rewritten** — trigger the real OS biometric prompt instead of fake animations.
+- **55 new engine tests** — `voiceprint.test.ts` (25) covers the full DSP pipeline and store; `webauthn-biometrics.test.ts` (21) covers options building, enrollment, and scoped authentication.
 
-### Security & Quality
-- Backend hardened with bcrypt, PyJWT, CORS, slowapi rate-limiting, SQLModel/SQLite, WebAuthn passkey endpoints
-- Vitest suite: 5 test files, 64 green tests, v8 coverage at 60% thresholds
-- AuthAdapter interface contract tests — 11 methods verified
+### Changed
+
+- **BREAKING:** `verifyFace()` and `verifyFingerprint()` no longer accept payloads (`imageBase64` / `scanData` removed) — the OS biometric prompt is triggered internally.
+- **BREAKING:** `AuthAdapter` interface now has **12 methods** (was 11) — `enrollVoice()` added.
+- **BREAKING:** biometrics follow **register-first-then-login** — `enrollBiometrics()` / `enrollVoice()` must succeed before `verifyFace()` / `verifyFingerprint()` / `verifyVoice()` will authenticate.
+- `MockAuthAdapter` and `BackendAuthAdapter` biometric methods rewritten on top of the real engines; `BackendAuthAdapter` exchanges a local biometric assertion for a backend session via `biometric-login`.
+- Backend `requirements.txt`: `python-jose[cryptography]` → **PyJWT** (fixes a latent production bug — code imported `jwt` while the unmaintained `python-jose` was installed).
+- Backend startup converted from deprecated `@app.on_event("startup")` to the FastAPI **lifespan** handler.
+- Test suite expanded to **119 frontend tests** (7 suites) + **18 backend tests**; adapter/context suites rewritten against the real engines (OS prompt & DSP stubbed at the seam, stores kept genuine).
+
+### Removed
+
+- **BREAKING:** fake backend endpoints `POST /api/v1/auth/verify-face`, `verify-voice`, `verify-fingerprint`, `GET /api/v1/auth/webauthn/options`, `POST /api/v1/auth/webauthn/verify` — they accepted arbitrary payloads and always succeeded.
+- All fake biometric shortcuts (instant `FACE-*` / `VOICE-*` / `FP-*` demo logins without any verification).
+
+### Security
+
+- Biometric login now requires prior enrollment server-side (`has_biometrics` gate).
+- Face/fingerprint login requires a `credential_id` cryptographically bound to the claimed user (`Passkey` table check); unbound credentials are rejected.
+- Rate limiting on both new biometric endpoints (10/min enroll, 20/min login).
+- Voice matching runs entirely on-device; only the match result is sent to the backend.
+
+---
 
 ## [1.0.0] — 2026-08-20
 
@@ -48,5 +68,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full TypeScript strict-mode typing
 - Full unit/regression test suite with Vitest
 
-[Unreleased]: https://github.com/jarvis-security/jarvis-security-suite/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jarvis-security/jarvis-security-suite/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/jarvis-security/jarvis-security-suite/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/jarvis-security/jarvis-security-suite/releases/tag/v1.0.0

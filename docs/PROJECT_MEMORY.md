@@ -47,7 +47,7 @@ jarvis-security-suite/            ← project root (package.json here)
 │   │   ├── auth-adapter.ts           (Mock / Backend / Firebase classes)
 │   │   └── sound-engine.ts           (Web Audio synth)
 │   ├── types/index.ts                (All shared TS interfaces, AuthAdapter contract)
-│   ├── python-backend/               (FastAPI stub — main.py + requirements.txt)
+│   ├── python-backend/               (Hardened FastAPI backend — bcrypt, JWT, rate limiting, 18 pytest tests)
 │   ├── globals.css
 │   ├── layout.tsx
 │   └── page.tsx
@@ -72,19 +72,22 @@ jarvis-security-suite/            ← project root (package.json here)
 `NEXT_PUBLIC_AUTH_ADAPTER` ∈ {`mock` (default), `backend`, `firebase`}
 `NEXT_PUBLIC_AUTH_API_URL` (backend only, default http://localhost:8000)
 
-## Build Verification (this session)
-- `tsc --noEmit` → 0 errors
-- `next build` → 4/4 pages static prerendered, first load 87.3kB
-- `next dev` → boots on :3000, full DOM renders (27 interactive refs)
-- Browser console: 0 runtime errors (only React DevTools info + hydrate attribute warn from test harness)
+## Build Verification (v2.0.0, 2026-08-26)
+- `npm run typecheck` → PASS
+- `npm run test:run` → 119/119 PASS (7 suites)
+- `npm run build` → PASS
+- `npm run build:sdk` → PASS (ESM + CJS + DTS)
+- Backend `pytest test_main.py` → 18/18 PASS
+- Published: `@jarvis-security/sdk@2.0.0` on npm
 
 ## Upcoming / Backlog
-1. Write Vitest unit tests for `MockAuthAdapter` + `SoundEngine` + `AuthContext` reducer
-2. Production-harden `BackendAuthAdapter` with refresh token rotation, CSRF, rate-limit headers
-3. Implement real WebAuthn passkey registration/assertion in enrollBiometrics (`@simplewebauthn/browser` already installed)
-4. Add `AuthAdapter` implementations for Supabase, Auth0, Clerk as community adapters
-5. Create actual Weather Service integration (separate phase per rules)
-6. Storybook visual regression snapshots for all biometric panels
+1. ~~**Voiceprint Engine**~~ — ✅ DONE in v2.0.0 (`app/lib/voiceprint.ts`, real MFCC DSP)
+2. Write Vitest unit tests for `MockAuthAdapter` + `SoundEngine` + `AuthContext` reducer
+3. Production-harden `BackendAuthAdapter` with refresh token rotation, CSRF, rate-limit headers
+4. ~~Implement real WebAuthn passkey registration/assertion in enrollBiometrics (`@simplewebauthn/browser` already installed)~~ — ✅ DONE in v2.0.0 (`app/lib/webauthn-biometrics.ts`, platform authenticator for face/fingerprint)
+5. Add `AuthAdapter` implementations for Supabase, Auth0, Clerk as community adapters
+6. Create actual Weather Service integration (separate phase per rules)
+7. Storybook visual regression snapshots for all biometric panels
 
 ## Lessons Learned
 - Tailwind JIT **cannot detect dynamically interpolated classes** like `` `bg-cyber-${accent}/20` `` → always use `style` prop or full literal strings
