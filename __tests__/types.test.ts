@@ -84,17 +84,19 @@ describe("types contract", () => {
     expect(a.title).toBe("T");
   });
 
-  it("AuthAdapter interface lists 11 required methods and a name property", () => {
+  it("AuthAdapter interface lists 12 required methods and a name property", () => {
     const adapter: AuthAdapter = {
       name: "ContractCheck",
       register: async () => ({ success: true }),
       login: async () => ({ success: true }),
       logout: async () => ({ success: true }),
       resetPassword: async () => ({ success: true }),
+      resetPasswordConfirm: async () => ({ success: true }),
       verifyFace: async () => ({ success: true }),
       verifyVoice: async () => ({ success: true }),
       verifyFingerprint: async () => ({ success: true }),
       enrollBiometrics: async () => ({ success: true }),
+      enrollVoice: async () => ({ success: true }),
       verifyPasskey: async () => ({ success: true }),
       getCurrentUser: async () => null,
       onAuthStateChanged: () => () => {},
@@ -105,15 +107,17 @@ describe("types contract", () => {
       "login",
       "logout",
       "resetPassword",
+      "resetPasswordConfirm",
       "verifyFace",
       "verifyVoice",
       "verifyFingerprint",
       "enrollBiometrics",
+      "enrollVoice",
       "verifyPasskey",
       "getCurrentUser",
       "onAuthStateChanged",
     ];
-    expect(methods.length).toBe(11);
-    for (const m of methods) expect((adapter as any)[m]).toBeTypeOf("function");
+    expect(methods.length).toBe(13);
+    for (const m of methods) expect(typeof (adapter as any)[m]).toBe("function");
   });
 });

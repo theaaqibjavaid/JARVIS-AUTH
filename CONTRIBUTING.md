@@ -47,7 +47,7 @@ jarvis-security-suite/
 │   ├── types/               # TypeScript interfaces and types
 │   ├── python-backend/      # FastAPI backend (bcrypt, JWT, WebAuthn)
 │   └── index.ts             # SDK barrel entry point
-├── __tests__/               # Vitest test suite (119 tests, 7 suites)
+├── __tests__/               # Vitest test suite (132 tests, 7 suites)
 ├── docs/                    # Project documentation and task logs
 ├── dist/                    # Compiled SDK output (after build)
 ├── package.json             # Package manifest, SDK build config
@@ -91,10 +91,10 @@ Tests use **Vitest 1.6** with jsdom environment and React Testing Library.
 ```bash
 npm test           # Run all tests
 npm run test:watch # Watch mode
-npm run test:coverage # Run with 60% coverage thresholds
+npm run test:coverage # Run with 80% coverage thresholds
 ```
 
-**Coverage thresholds**: 60% (statements, branches, functions, lines)
+**Coverage thresholds**: 80% (statements, branches, functions, lines)
 
 When adding new features, always add or update tests. Each feature should have at least one unit test and, where applicable, one regression test.
 

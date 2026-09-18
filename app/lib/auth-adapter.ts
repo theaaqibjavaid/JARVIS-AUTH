@@ -128,7 +128,9 @@ export class MockAuthAdapter implements AuthAdapter {
       return { success: true, user: this.currentUser };
     }
 
-    if (email && passkey.length >= 6) {
+    // Demo-only auto-login: requires JARVIS_DEMO_MODE=true to be set.
+    const isDemoMode = typeof process !== "undefined" ? process.env?.JARVIS_DEMO_MODE === "true" : false;
+    if (isDemoMode && email && passkey.length >= 6) {
       const user: UserProfile = {
         uid: generateUid("MOCK"),
         email: key,
@@ -166,10 +168,54 @@ export class MockAuthAdapter implements AuthAdapter {
         errorCode: "missing-email",
       };
     }
+    // Mock adapter cannot send real emails — the user must provide the token
+    // that the backend issued. The caller (UI) should display the token so
+    // the user can paste it into the confirm form.
     return {
       success: true,
       user: undefined,
+      _debugToken: "MOCK-TOKEN-0000",
     };
+  }
+
+  async resetPasswordConfirm(
+    email: string,
+    token: string,
+    newPasskey: string
+  ): Promise<AuthResult> {
+    if (!email || !token || !newPasskey) {
+      return {
+        success: false,
+        error: "Email, token, and new passkey are all required.",
+        errorCode: "missing-fields",
+      };
+    }
+    if (newPasskey.length < 6) {
+      return {
+        success: false,
+        error: "New passkey must be at least 6 characters long.",
+        errorCode: "weak-passkey",
+      };
+    }
+    const key = email.toLowerCase();
+    // In mock mode we accept the demo token issued by resetPassword.
+    if (token !== "MOCK-TOKEN-0000") {
+      return {
+        success: false,
+        error: "Invalid or expired reset token.",
+        errorCode: "invalid-token",
+      };
+    }
+    const entry = DEMO_USERS[key];
+    if (!entry) {
+      return {
+        success: false,
+        error: "No account found for this email.",
+        errorCode: "user-not-found",
+      };
+    }
+    entry.passkey = newPasskey;
+    return { success: true };
   }
 
   /** Resolve a full profile for an email (falls back to a minimal profile). */
@@ -476,7 +522,55 @@ export class BackendAuthAdapter implements AuthAdapter {
         errorCode: "missing-email",
       };
     }
-    return { success: true };
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/auth/reset-password/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.toLowerCase() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        return { success: true };
+      }
+      return { success: false, error: data.detail ?? "Reset request failed" };
+    } catch {
+      return { success: false, error: "Failed to contact authentication server." };
+    }
+  }
+
+  async resetPasswordConfirm(
+    email: string,
+    token: string,
+    newPasskey: string
+  ): Promise<AuthResult> {
+    if (!email || !token || !newPasskey) {
+      return {
+        success: false,
+        error: "Email, token, and new passkey are all required.",
+        errorCode: "missing-fields",
+      };
+    }
+    if (newPasskey.length < 6) {
+      return {
+        success: false,
+        error: "New passkey must be at least 6 characters long.",
+        errorCode: "weak-passkey",
+      };
+    }
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/auth/reset-password/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.toLowerCase(), token, new_passkey: newPasskey }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        return { success: true };
+      }
+      return { success: false, error: data.detail ?? "Reset confirmation failed" };
+    } catch {
+      return { success: false, error: "Failed to contact authentication server." };
+    }
   }
 
   /** Establish a session with the backend after a successful local biometric gate. */
@@ -682,7 +776,7 @@ export class BackendAuthAdapter implements AuthAdapter {
   }
 }
 
-export type AuthAdapterName = "mock" | "backend" | "firebase";
+export type AuthAdapterName = "mock" | "backend";
 
 export function createAuthAdapter(
   kind: AuthAdapterName = "mock",
@@ -691,8 +785,6 @@ export function createAuthAdapter(
   switch (kind) {
     case "backend":
       return new BackendAuthAdapter(options?.baseUrl);
-    case "firebase":
-      return new MockAuthAdapter();
     case "mock":
     default:
       return new MockAuthAdapter();

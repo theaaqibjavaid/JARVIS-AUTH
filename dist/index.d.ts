@@ -18,6 +18,8 @@ interface AuthResult {
     user?: UserProfile;
     error?: string;
     errorCode?: string;
+    /** Debug token issued by mock adapter's resetPassword for use with resetPasswordConfirm. */
+    _debugToken?: string;
 }
 interface AuthAdapter {
     readonly name: string;
@@ -25,6 +27,8 @@ interface AuthAdapter {
     login(email: string, passkey: string): Promise<AuthResult>;
     logout(): Promise<AuthResult>;
     resetPassword(email: string): Promise<AuthResult>;
+    /** Confirm a password reset using the token issued by resetPassword(request). */
+    resetPasswordConfirm(email: string, token: string, newPasskey: string): Promise<AuthResult>;
     /** Device face auth via WebAuthn platform authenticator (Windows Hello / Face ID). */
     verifyFace(): Promise<AuthResult>;
     /** Voice auth via real DSP voiceprint matching against an enrolled sample. */
@@ -69,6 +73,7 @@ declare class MockAuthAdapter implements AuthAdapter {
     login(email: string, passkey: string): Promise<AuthResult>;
     logout(): Promise<AuthResult>;
     resetPassword(email: string): Promise<AuthResult>;
+    resetPasswordConfirm(email: string, token: string, newPasskey: string): Promise<AuthResult>;
     /** Resolve a full profile for an email (falls back to a minimal profile). */
     private resolveUserByEmail;
     /** Stamp, persist and broadcast an authenticated user. */
@@ -97,6 +102,7 @@ declare class BackendAuthAdapter implements AuthAdapter {
     login(email: string, passkey: string): Promise<AuthResult>;
     logout(): Promise<AuthResult>;
     resetPassword(email: string): Promise<AuthResult>;
+    resetPasswordConfirm(email: string, token: string, newPasskey: string): Promise<AuthResult>;
     /** Establish a session with the backend after a successful local biometric gate. */
     private biometricLogin;
     verifyFace(): Promise<AuthResult>;
@@ -108,7 +114,7 @@ declare class BackendAuthAdapter implements AuthAdapter {
     getCurrentUser(): Promise<UserProfile | null>;
     onAuthStateChanged(callback: (user: UserProfile | null) => void): () => void;
 }
-type AuthAdapterName = "mock" | "backend" | "firebase";
+type AuthAdapterName = "mock" | "backend";
 declare function createAuthAdapter(kind?: AuthAdapterName, options?: {
     baseUrl?: string;
 }): AuthAdapter;
@@ -128,6 +134,7 @@ interface AuthContextValue {
     register: (email: string, passkey: string, fullName: string) => Promise<void>;
     logout: () => Promise<void>;
     resetPassword: (email: string) => Promise<void>;
+    resetPasswordConfirm: (email: string, token: string, newPasskey: string) => Promise<void>;
     verifyFace: () => Promise<void>;
     verifyVoice: (audioBlob: Blob) => Promise<void>;
     verifyFingerprint: () => Promise<void>;
@@ -160,6 +167,7 @@ declare class SoundEngine {
     playSuccess(): void;
     playError(): void;
     unlock(): void;
+    close(): void;
 }
 
 declare function AuthPortal(): react.JSX.Element;

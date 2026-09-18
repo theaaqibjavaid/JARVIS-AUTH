@@ -35,6 +35,72 @@ const CREDENTIAL_STORE_KEY = "jarvis_platform_credentials";
 const RP_NAME = "J.A.R.V.I.S. Security Suite";
 
 // ---------------------------------------------------------------------------
+// Encryption key — derived via PBKDF2 from an app-level passphrase.
+// Each stored entry is independently encrypted with AES-256-GCM.
+// ---------------------------------------------------------------------------
+const ENCRYPT_SALT = "jarvis-credential-store-salt-v1";
+const PBKDF2_ITERATIONS = 100_000;
+
+/** Decode a base64url string to raw bytes. */
+export function decodeBase64Url(base64url: string): Uint8Array {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = base64.length % 4 === 0 ? "" : "=".repeat(4 - base64.length % 4);
+  const binary =
+    typeof atob !== "undefined"
+      ? atob(base64 + padding)
+      : Buffer.from(base64 + padding, "base64").toString("binary");
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** Derive an AES-256-GCM encryption key from the app passphrase via PBKDF2. */
+async function deriveEncryptKey(): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(ENCRYPT_SALT),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: encoder.encode(ENCRYPT_SALT), iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+/** Encrypt a JSON-serializable object and return base64url ciphertext. */
+export async function encryptStoreData(data: unknown): Promise<string> {
+  const key = await deriveEncryptKey();
+  const encoder = new TextEncoder();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    encoder.encode(JSON.stringify(data))
+  );
+  const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(ciphertext), iv.length);
+  return bufferToBase64Url(combined);
+}
+
+/** Decrypt a base64url ciphertext and return the parsed object. */
+export async function decryptStoreData(b64: string): Promise<Record<string, StoredPlatformCredential>> {
+  const key = await deriveEncryptKey();
+  const combined = decodeBase64Url(b64);
+  if (combined.length < 13) return {};
+  const iv = combined.slice(0, 12);
+  const ciphertext = combined.slice(12);
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  return JSON.parse(new TextDecoder().decode(plaintext)) as Record<string, StoredPlatformCredential>;
+}
+
+// ---------------------------------------------------------------------------
 // base64url helpers (self-contained, work in browser + node for tests)
 // ---------------------------------------------------------------------------
 
@@ -101,54 +167,65 @@ export interface StoredPlatformCredential {
 }
 
 export class PlatformCredentialStore {
-  private read(): Record<string, StoredPlatformCredential> {
+  private async read(): Promise<Record<string, StoredPlatformCredential>> {
     if (typeof window === "undefined") return {};
     try {
       const raw = window.localStorage.getItem(CREDENTIAL_STORE_KEY);
-      return raw
-        ? (JSON.parse(raw) as Record<string, StoredPlatformCredential>)
-        : {};
+      if (!raw) return {};
+      // Legacy plaintext data starts with '{' (JSON object)
+      if (raw.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(raw) as Record<string, StoredPlatformCredential>;
+          await this.write(parsed); // Migrate to encrypted format
+          return parsed;
+        } catch {
+          return {};
+        }
+      }
+      return await decryptStoreData(raw);
     } catch {
       return {};
     }
   }
 
-  private write(map: Record<string, StoredPlatformCredential>): void {
+  private async write(map: Record<string, StoredPlatformCredential>): Promise<void> {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(CREDENTIAL_STORE_KEY, JSON.stringify(map));
+    const encrypted = await encryptStoreData(map);
+    window.localStorage.setItem(CREDENTIAL_STORE_KEY, encrypted);
   }
 
-  save(email: string, credential: StoredPlatformCredential): void {
-    const map = this.read();
+  async save(email: string, credential: StoredPlatformCredential): Promise<void> {
+    const map = await this.read();
     map[email.toLowerCase()] = { ...credential, email: email.toLowerCase() };
-    this.write(map);
+    await this.write(map);
   }
 
-  get(email: string): StoredPlatformCredential | null {
-    return this.read()[email.toLowerCase()] ?? null;
+  async get(email: string): Promise<StoredPlatformCredential | null> {
+    const map = await this.read();
+    return map[email.toLowerCase()] ?? null;
   }
 
-  has(email: string): boolean {
-    return Boolean(this.get(email));
+  async has(email: string): Promise<boolean> {
+    return Boolean(await this.get(email));
   }
 
-  getAll(): StoredPlatformCredential[] {
-    return Object.values(this.read());
+  async getAll(): Promise<StoredPlatformCredential[]> {
+    return Object.values(await this.read());
   }
 
-  remove(email: string): void {
-    const map = this.read();
+  async remove(email: string): Promise<void> {
+    const map = await this.read();
     delete map[email.toLowerCase()];
-    this.write(map);
+    await this.write(map);
   }
 
-  clear(): void {
+  async clear(): Promise<void> {
     if (typeof window === "undefined") return;
     window.localStorage.removeItem(CREDENTIAL_STORE_KEY);
   }
 
-  findByCredentialId(credentialId: string): StoredPlatformCredential | null {
-    for (const entry of this.getAll()) {
+  async findByCredentialId(credentialId: string): Promise<StoredPlatformCredential | null> {
+    for (const entry of await this.getAll()) {
       if (entry.credentialId === credentialId) return entry;
     }
     return null;
@@ -265,7 +342,7 @@ export async function enrollPlatformBiometric(
         errorCode: "enroll-no-credential",
       };
     }
-    store.save(user.email, {
+    await store.save(user.email, {
       email: user.email,
       credentialId: credential.id,
       publicKey: credential.response?.publicKey,
@@ -304,10 +381,10 @@ export async function verifyPlatformBiometric(
     };
   }
 
-  const scoped = email ? store.get(email) : null;
+  const scoped = email ? await store.get(email) : null;
   const allowIds = scoped
     ? [scoped.credentialId]
-    : store.getAll().map((c) => c.credentialId);
+    : (await store.getAll()).map((c) => c.credentialId);
 
   if (allowIds.length === 0) {
     return {
@@ -328,7 +405,7 @@ export async function verifyPlatformBiometric(
         errorCode: "auth-no-assertion",
       };
     }
-    const matched = store.findByCredentialId(assertion.id);
+    const matched = await store.findByCredentialId(assertion.id);
     if (!matched) {
       return {
         success: false,

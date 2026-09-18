@@ -1,19 +1,19 @@
 # Current Task — Priority Order
 
 ## ✅ JUST COMPLETED: v2.0.0 — Real Biometrics Rebuild (2026-08-26, published to npm)
-**Status**: ✅ COMPLETE — Real biometrics shipped, 119 frontend tests + 18 backend tests green, SDK v2.0.0 published.
+**Status**: ✅ COMPLETE — Real biometrics shipped, 132 frontend tests + 25 backend tests green, SDK v2.0.1 published.
 **Task ref**: v2.0.0 real biometrics rebuild
 **Date**: 2026-08-26
 **What was done**: Replaced all fake/mock biometrics with real verification and a register-first-then-login model.
 - `app/lib/webauthn-biometrics.ts` (NEW) — real WebAuthn platform authenticator engine for face + fingerprint (Windows Hello / Face ID / Touch ID). OS verifies the biometric; raw data never leaves the device. Per-email credential store with signature-count tracking.
 - `app/lib/voiceprint.ts` (NEW) — real client-side MFCC DSP voiceprint engine (pre-emphasis → Hamming → radix-2 FFT → mel filterbank → log → DCT → 26-dim vector, cosine similarity, threshold 0.82). Fully offline.
-- `app/types/index.ts` — `AuthAdapter` now has 12 methods: `verifyFace()` / `verifyFingerprint()` are no-arg (OS prompt internal), new `enrollVoice(audioBlob)`.
+- `app/types/index.ts` — `AuthAdapter` now has 13 methods: `verifyFace()` / `verifyFingerprint()` are no-arg (OS prompt internal), new `enrollVoice(audioBlob)`, plus `resetPasswordConfirm()` added in v2.0.1.
 - `app/lib/auth-adapter.ts` — Mock + Backend adapters rewritten on the real engines; BackendAuthAdapter exchanges the local assertion for a session via `POST /api/v1/auth/biometric-login`.
 - UI — FacialScanner / FingerprintPad trigger the real OS prompt; VoiceScanner has dual ENROLL/VERIFY modes with real mic recording; DashboardPanel enrolls device biometrics.
 - Backend `main.py` — removed 5 fake endpoints (`verify-face/voice/fingerprint`, `webauthn/options`, `webauthn/verify`); added `POST /api/v1/auth/enroll-biometric` (10/min) + `POST /api/v1/auth/biometric-login` (20/min) with enrollment gate + credential-binding check. `python-jose` → PyJWT fix; `on_event` → lifespan.
 - Tests — 55 new engine tests (`voiceprint.test.ts` 25, `webauthn-biometrics.test.ts` 21) + adapter/context suites rewritten against the real engines.
-- Verification — Frontend: 119/119 tests pass (7 suites), typecheck clean, `next build` success, tsup SDK build success. Backend: 18/18 pytest pass. Published: `@jarvis-security/sdk@2.0.0` on npm.
-- Docs — README.md, CHANGELOG.md, and CONTRIBUTING.md updated for v2.0.0.
+- Verification — Frontend: 132/132 tests pass (7 suites), typecheck clean, `next build` success, tsup SDK build success. Backend: 25/25 pytest pass. Published: `@jarvis-security/sdk@2.0.1` on npm.
+- Docs — README.md, CHANGELOG.md, and CONTRIBUTING.md updated for v2.0.1.
 
 ---
 

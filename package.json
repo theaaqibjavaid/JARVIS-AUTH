@@ -1,6 +1,6 @@
 {
   "name": "@jarvis-security/sdk",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "J.A.R.V.I.S. Futuristic Pluggable Authentication Suite",
   "license": "MIT",
   "main": "dist/index.cjs",
@@ -38,7 +38,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "build:sdk": "tsup"
+    "build:sdk": "tsup",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build:sdk"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^10.0.0",

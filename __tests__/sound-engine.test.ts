@@ -96,4 +96,15 @@ describe("SoundEngine", () => {
       vi.stubGlobal("webkitAudioContext", FakeAudioContext);
     }
   });
+
+  it("close() nulls the internal context without throwing", () => {
+    engine.unlock();
+    expect(() => engine.close()).not.toThrow();
+  });
+
+  it("playBeep after close() does not throw", () => {
+    engine.unlock();
+    engine.close();
+    expect(() => engine.playBeep(440)).not.toThrow();
+  });
 });

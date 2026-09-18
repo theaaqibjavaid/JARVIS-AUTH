@@ -149,8 +149,10 @@ function DashboardPanel() {
   // Reflect the true per-method enrollment state from the on-device stores.
   useEffect(() => {
     if (!user) return;
-    setDeviceEnrolled(new PlatformCredentialStore().has(user.email));
-    setVoiceEnrolled(new VoiceprintStore().has(user.email));
+    (async () => {
+      setDeviceEnrolled(await new PlatformCredentialStore().has(user.email));
+      setVoiceEnrolled(await new VoiceprintStore().has(user.email));
+    })();
   }, [user]);
 
   if (!user) return null;

@@ -58,4 +58,15 @@ export class SoundEngine {
   unlock(): void {
     this.ensureContext();
   }
+
+  close(): void {
+    if (this.ctx) {
+      try {
+        this.ctx.close();
+      } catch {
+        /* noop */
+      }
+      this.ctx = null;
+    }
+  }
 }

@@ -8,7 +8,7 @@ import type { AuthAdapterName } from "./lib/auth-adapter";
 function resolveAdapter(): AuthAdapterName {
   if (typeof process === "undefined") return "mock";
   const raw = process.env.NEXT_PUBLIC_AUTH_ADAPTER as string | undefined;
-  if (raw === "backend" || raw === "firebase" || raw === "mock") return raw;
+  if (raw === "backend" || raw === "mock") return raw;
   return "mock";
 }
 

@@ -1,6 +1,10 @@
 /// <reference types="vitest/globals" />
 import "@testing-library/jest-dom/vitest";
 
+// Enable demo auto-login in test environments so tests don't need explicit registration.
+// In production, JARVIS_DEMO_MODE must be explicitly set to "true".
+process.env.JARVIS_DEMO_MODE = "true";
+
 if (typeof window !== "undefined") {
   if (!window.matchMedia) {
     Object.defineProperty(window, "matchMedia", {

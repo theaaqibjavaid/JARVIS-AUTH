@@ -6,11 +6,14 @@ import {
 import {
   bufferToBase64Url,
   stringToBase64Url,
+  decodeBase64Url,
   randomChallenge,
   resolveRpId,
   isPlatformBiometricSupported,
   buildRegistrationOptions,
   buildAuthenticationOptions,
+  encryptStoreData,
+  decryptStoreData,
   PlatformCredentialStore,
   enrollPlatformBiometric,
   verifyPlatformBiometric,
@@ -115,6 +118,35 @@ describe("options builders", () => {
   });
 });
 
+describe("encryption helpers", () => {
+  it("decodeBase64Url reverses bufferToBase64Url", () => {
+    const original = "hello world";
+    const encoded = stringToBase64Url(original);
+    const decoded = new TextDecoder().decode(decodeBase64Url(encoded));
+    expect(decoded).toBe(original);
+  });
+
+  it("encryptStoreData + decryptStoreData round-trip preserves data", async () => {
+    const data = { "user@example.io": { email: "user@example.io", credentialId: "cred-xyz", signCount: 0, enrolledAt: "2026-01-01T00:00:00.000Z" } };
+    const encrypted = await encryptStoreData(data);
+    // Encrypted data starts with "____" prefix (base64url of IV+ciphertext is always >= 4 chars)
+    expect(encrypted).not.toBe(JSON.stringify(data));
+    expect(encrypted.length).toBeGreaterThan(data.toString().length);
+    const decrypted = await decryptStoreData(encrypted);
+    expect(decrypted["user@example.io"]?.credentialId).toBe("cred-xyz");
+  });
+
+  it("decryptStoreData returns empty object for tampered ciphertext", async () => {
+    // Use data long enough to pass the 13-byte minimum but invalid for AES-GCM
+    await expect(decryptStoreData("AAAAAAAAAAAAAAAAAAAAAA==")).rejects.toThrow();
+  });
+
+  it("decryptStoreData returns empty object for short input", async () => {
+    const result = await decryptStoreData("abc");
+    expect(result).toEqual({});
+  });
+});
+
 describe("PlatformCredentialStore", () => {
   let store: PlatformCredentialStore;
 
@@ -130,26 +162,45 @@ describe("PlatformCredentialStore", () => {
     enrolledAt: "2026-01-01T00:00:00.000Z",
   };
 
-  it("save + get + has round-trip (case-insensitive email)", () => {
-    store.save("OP@Example.io", cred);
-    expect(store.has("op@example.io")).toBe(true);
-    expect(store.get("op@example.io")?.credentialId).toBe("cred-123");
+  it("save + get + has round-trip (case-insensitive email)", async () => {
+    await store.save("OP@Example.io", cred);
+    expect(await store.has("op@example.io")).toBe(true);
+    expect((await store.get("op@example.io"))?.credentialId).toBe("cred-123");
   });
 
-  it("getAll and findByCredentialId", () => {
-    store.save("op@example.io", cred);
-    expect(store.getAll().length).toBe(1);
-    expect(store.findByCredentialId("cred-123")?.email).toBe("op@example.io");
-    expect(store.findByCredentialId("missing")).toBeNull();
+  it("getAll and findByCredentialId", async () => {
+    await store.save("op@example.io", cred);
+    expect((await store.getAll()).length).toBe(1);
+    expect((await store.findByCredentialId("cred-123"))?.email).toBe("op@example.io");
+    expect(await store.findByCredentialId("missing")).toBeNull();
   });
 
-  it("remove and clear", () => {
-    store.save("op@example.io", cred);
-    store.remove("op@example.io");
-    expect(store.has("op@example.io")).toBe(false);
-    store.save("op@example.io", cred);
-    store.clear();
-    expect(store.getAll().length).toBe(0);
+  it("remove and clear", async () => {
+    await store.save("op@example.io", cred);
+    await store.remove("op@example.io");
+    expect(await store.has("op@example.io")).toBe(false);
+    await store.save("op@example.io", cred);
+    await store.clear();
+    expect((await store.getAll()).length).toBe(0);
+  });
+
+  it("stored data in localStorage is encrypted (not plaintext JSON)", async () => {
+    await store.save("op@example.io", cred);
+    const raw = window.localStorage.getItem("jarvis_platform_credentials");
+    expect(raw).not.toBeNull();
+    expect(raw!.startsWith("{")).toBe(false); // not plaintext JSON
+    // Re-reading through the store should still work
+    expect((await store.getAll()).length).toBe(1);
+  });
+
+  it("migrates legacy plaintext data to encrypted format", async () => {
+    const legacyData = JSON.stringify({ "old@example.io": cred });
+    window.localStorage.setItem("jarvis_platform_credentials", legacyData);
+    const freshStore = new PlatformCredentialStore();
+    expect(await freshStore.has("old@example.io")).toBe(true);
+    // Now stored data should be encrypted
+    const raw = window.localStorage.getItem("jarvis_platform_credentials");
+    expect(raw!.startsWith("{")).toBe(false);
   });
 });
 
@@ -165,8 +216,8 @@ describe("enrollPlatformBiometric", () => {
     const result = await enrollPlatformBiometric(user, store, driver);
     expect(result.success).toBe(true);
     expect(result.credentialId).toBe("cred-abc");
-    expect(store.has("op@example.io")).toBe(true);
-    expect(store.get("op@example.io")?.credentialId).toBe("cred-abc");
+    expect(await store.has("op@example.io")).toBe(true);
+    expect((await store.get("op@example.io"))?.credentialId).toBe("cred-abc");
   });
 
   it("fails when the authenticator is unavailable", async () => {

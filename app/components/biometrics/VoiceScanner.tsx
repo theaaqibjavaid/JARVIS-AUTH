@@ -4,7 +4,18 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, ShieldAlert } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
-const PHRASE = "JARVIS ACCESS AUTHORIZATION CODE SEVEN";
+const PHRASE_POOL = [
+  "JARVIS ACCESS AUTHORIZATION CODE SEVEN",
+  "OMEGA PRIME VOICE AUTHENTICATED",
+  "STARK INDUSTRIES BIOMETRIC CLEARANCE",
+  "VOICE PRINT CONFIRMED PROTOCOL ALPHA",
+  "JARVIS VERIDICAL SONIC AUTHORIZATION",
+];
+
+function getRandomPhrase(): string {
+  return PHRASE_POOL[Math.floor(Math.random() * PHRASE_POOL.length)];
+}
+
 const RECORD_MS = 3000;
 const DEFAULT_HEIGHTS = [10, 14, 18, 14, 10, 7, 5];
 
@@ -28,10 +39,14 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
   const [listening, setListening] = useState(false);
   const [heights, setHeights] = useState<number[]>(DEFAULT_HEIGHTS);
   const [micError, setMicError] = useState<string | null>(null);
+  const [phrase] = useState(() => getRandomPhrase());
   const intervalRef = useRef<number | null>(null);
   const timeoutRef = useRef<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number | null>(null);
 
   const isEnroll = mode === "enroll";
 
@@ -39,13 +54,13 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
     return () => {
       if (intervalRef.current) window.clearInterval(intervalRef.current);
       if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
+      if (animFrameRef.current) window.cancelAnimationFrame(animFrameRef.current);
+      if (audioContextRef.current) {
+        try { audioContextRef.current.close(); } catch { /* noop */ }
+      }
       const rec = mediaRecorderRef.current;
       if (rec && rec.state !== "inactive") {
-        try {
-          rec.stop();
-        } catch {
-          /* noop */
-        }
+        try { rec.stop(); } catch { /* noop */ }
         if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop());
       }
     };
@@ -66,7 +81,7 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
     ) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
+          audio: { sampleRate: 16000, channelCount: 1 },
         });
         const Mr = (window as unknown as { MediaRecorder?: typeof MediaRecorder })
           .MediaRecorder;
@@ -78,6 +93,33 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
           };
           rec.start();
           started = true;
+
+          // Set up real-time FFT visualizer from the live audio stream.
+          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const source = audioCtx.createMediaStreamSource(stream);
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 256;
+          source.connect(analyser);
+          audioContextRef.current = audioCtx;
+          analyserRef.current = analyser;
+
+          const bufferLength = analyser.frequencyBinCount;
+          const dataArray = new Uint8Array(bufferLength);
+          const barCount = DEFAULT_HEIGHTS.length;
+
+          const draw = () => {
+            animFrameRef.current = window.requestAnimationFrame(draw);
+            analyser.getByteFrequencyData(dataArray);
+            const step = Math.floor(bufferLength / barCount);
+            const newHeights = Array.from({ length: barCount }, (_, i) => {
+              let sum = 0;
+              for (let j = 0; j < step; j++) sum += dataArray[i * step + j] || 0;
+              const avg = sum / step;
+              return Math.max(4, Math.floor((avg / 255) * 50));
+            });
+            setHeights(newHeights);
+          };
+          draw();
         } else {
           stream.getTracks().forEach((t) => t.stop());
         }
@@ -93,17 +135,14 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
       return;
     }
 
-    const animate = () => {
-      playBeep(400 + Math.random() * 600, "sine", 0.05);
-      setHeights(DEFAULT_HEIGHTS.map(() => Math.floor(Math.random() * 50) + 6));
-    };
-    animate();
-    intervalRef.current = window.setInterval(animate, 100);
-
     timeoutRef.current = window.setTimeout(async () => {
       if (intervalRef.current) {
         window.clearInterval(intervalRef.current);
         intervalRef.current = null;
+      }
+      if (animFrameRef.current) {
+        window.cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
       }
       setHeights(DEFAULT_HEIGHTS);
 
@@ -119,6 +158,13 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
         });
         if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop());
       }
+
+      // Clean up audio context and analyser.
+      if (audioContextRef.current) {
+        try { audioContextRef.current.close(); } catch { /* noop */ }
+        audioContextRef.current = null;
+      }
+      analyserRef.current = null;
       mediaRecorderRef.current = null;
 
       const mime = chunksRef.current[0]?.type || "audio/webm";
@@ -155,7 +201,7 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
           {heights.map((h, i) => (
             <div
               key={i}
-              className="w-1.5 bg-cyber-cyan rounded-full transition-all duration-150"
+              className="w-1.5 bg-cyber-cyan rounded-full transition-all duration-100"
               style={{
                 height: `${h}px`,
                 opacity: Math.max(0.3, Math.min(1, h / 50)),
@@ -165,7 +211,7 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
         </div>
 
         <div className="text-xs text-cyber-cyan font-mono mt-2 tracking-widest text-glow text-center">
-          PHRASE: &ldquo;{PHRASE}&rdquo;
+          PHRASE: &ldquo;{phrase}&rdquo;
         </div>
       </div>
 

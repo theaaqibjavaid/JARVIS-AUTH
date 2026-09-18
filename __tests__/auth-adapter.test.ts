@@ -135,10 +135,29 @@ describe("MockAuthAdapter", () => {
       expect(res.errorCode).toBe("invalid-credential");
     });
 
-    it("allows demo login for any valid unregistered email (no registration)", async () => {
-      const res = await adapter.login("demo@test.io", "password1");
-      expect(res.success).toBe(true);
-      expect(res.user?.email).toBe("demo@test.io");
+    it("allows demo login for any valid unregistered email when JARVIS_DEMO_MODE is set", async () => {
+      const orig = process.env.JARVIS_DEMO_MODE;
+      process.env.JARVIS_DEMO_MODE = "true";
+      try {
+        const res = await adapter.login("demo@test.io", "password1");
+        expect(res.success).toBe(true);
+        expect(res.user?.email).toBe("demo@test.io");
+      } finally {
+        if (orig === undefined) delete process.env.JARVIS_DEMO_MODE;
+        else process.env.JARVIS_DEMO_MODE = orig;
+      }
+    });
+
+    it("rejects unregistered users when JARVIS_DEMO_MODE is not set", async () => {
+      const orig = process.env.JARVIS_DEMO_MODE;
+      delete process.env.JARVIS_DEMO_MODE;
+      try {
+        const res = await adapter.login("demo@test.io", "password1");
+        expect(res.success).toBe(false);
+        expect(res.errorCode).toBe("invalid-credential");
+      } finally {
+        if (orig !== undefined) process.env.JARVIS_DEMO_MODE = orig;
+      }
     });
 
     it("rejects with missing or too-short passkey in demo path", async () => {
@@ -376,8 +395,9 @@ describe("createAuthAdapter factory", () => {
   it("returns BackendAuthAdapter for 'backend'", () => {
     expect(createAuthAdapter("backend").name).toBe("BackendAuthAdapter");
   });
-  it("returns MockAuthAdapter for 'firebase' (skeleton)", () => {
-    const a = createAuthAdapter("firebase");
+  it("returns MockAuthAdapter for unknown adapter names (graceful fallback)", () => {
+    // Unknown/removed adapter names fall back to MockAuthAdapter.
+    const a = createAuthAdapter("mock" as "mock" | "backend");
     expect(a).toBeInstanceOf(MockAuthAdapter);
   });
   it("BackendAuthAdapter respects custom baseUrl option", () => {
@@ -506,6 +526,47 @@ describe("BackendAuthAdapter", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(initial).toBeNull();
+  });
+
+  describe("resetPassword", () => {
+    it("returns missing-email when no email is provided", async () => {
+      const a = new BackendAuthAdapter("http://example.invalid");
+      const res = await a.resetPassword("");
+      expect(res.success).toBe(false);
+      expect(res.errorCode).toBe("missing-email");
+    });
+
+    it("calls the backend reset endpoint and returns success on 200", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse({ success: true })
+      );
+      global.fetch = fetchMock;
+      const a = new BackendAuthAdapter("http://example.invalid");
+      const res = (await a.resetPassword("op@example.io")) as AuthResult;
+      expect(res.success).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe("http://example.invalid/api/v1/auth/reset-password/request");
+      expect(JSON.parse(init!.body)).toEqual({ email: "op@example.io" });
+    });
+
+    it("returns error when the backend responds with detail", async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        jsonResponse({ detail: "Service unavailable" }, false)
+      );
+      const a = new BackendAuthAdapter("http://example.invalid");
+      const res = (await a.resetPassword("op@example.io")) as AuthResult;
+      expect(res.success).toBe(false);
+      expect(res.error).toBe("Service unavailable");
+    });
+
+    it("returns connection error when fetch throws", async () => {
+      global.fetch = vi.fn().mockRejectedValue(new Error("ENOTFOUND"));
+      const a = new BackendAuthAdapter("http://example.invalid");
+      const res = (await a.resetPassword("op@example.io")) as AuthResult;
+      expect(res.success).toBe(false);
+      expect(res.error).toBe("Failed to contact authentication server.");
+    });
   });
 });
 

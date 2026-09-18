@@ -19,6 +19,8 @@ export interface AuthResult {
   user?: UserProfile;
   error?: string;
   errorCode?: string;
+  /** Debug token issued by mock adapter's resetPassword for use with resetPasswordConfirm. */
+  _debugToken?: string;
 }
 
 export interface AuthAdapter {
@@ -31,6 +33,12 @@ export interface AuthAdapter {
   login(email: string, passkey: string): Promise<AuthResult>;
   logout(): Promise<AuthResult>;
   resetPassword(email: string): Promise<AuthResult>;
+  /** Confirm a password reset using the token issued by resetPassword(request). */
+  resetPasswordConfirm(
+    email: string,
+    token: string,
+    newPasskey: string
+  ): Promise<AuthResult>;
   /** Device face auth via WebAuthn platform authenticator (Windows Hello / Face ID). */
   verifyFace(): Promise<AuthResult>;
   /** Voice auth via real DSP voiceprint matching against an enrolled sample. */

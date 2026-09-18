@@ -9,6 +9,7 @@ Security features:
 """
 
 import os
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -24,19 +25,18 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from sqlmodel import Field as SQLField, Session, SQLModel, create_engine, select
+from fastapi.responses import JSONResponse
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-SECRET_KEY = os.environ.get(
-    "JARVIS_JWT_SECRET", "dev-secret-change-in-production"
-)
-if SECRET_KEY == "dev-secret-change-in-production":
-    import warnings
-    warnings.warn(
-        "JARVIS_JWT_SECRET not set — using insecure default. Set in production.",
-        stacklevel=2,
+_JWT_SECRET = os.environ.get("JARVIS_JWT_SECRET")
+if not _JWT_SECRET:
+    raise RuntimeError(
+        "JARVIS_JWT_SECRET environment variable is required. "
+        "Generate one with: openssl rand -hex 64"
     )
+SECRET_KEY: str = _JWT_SECRET
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -53,6 +53,10 @@ limiter = Limiter(
     default_limits=["30/minute"],
     headers_enabled=True,
 )
+
+# ---------------------------------------------------------------------------
+# CSRF / Origin validation middleware
+# ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -79,6 +83,57 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Add security headers to every response."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=()"
+    )
+    # HSTS: enforce HTTPS for 1 year, include subdomains
+    response.headers["Strict-Transport-Security"] = (
+        "max-age=31536000; includeSubDomains; preload"
+    )
+    # CSP: strict — only self + allowed origins for scripts/styles
+    origin = request.headers.get("origin", "")
+    csp_values = [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self'",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+        f"base-uri 'self'",
+        f"form-action 'self'",
+    ]
+    if origin and origin not in ("", "null"):
+        csp_values[1] += f" {origin}"
+        csp_values[2] += f" {origin}"
+        csp_values[5] += f" {origin}"
+    response.headers["Content-Security-Policy"] = "; ".join(csp_values)
+    return response
+
+
+@app.middleware("http")
+async def csrf_origin_middleware(request: Request, call_next):
+    """Reject cross-origin state-changing requests whose Origin is not allowed."""
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        origin = request.headers.get("origin")
+        if origin and origin not in ALLOWED_ORIGINS:
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "Cross-origin request forbidden"},
+            )
+    response = await call_next(request)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +340,66 @@ def register_operative(
         user=to_user_response(user),
         token=TokenResponse(access_token=access_token, refresh_token=refresh_token),
     )
+
+
+# ---------------------------------------------------------------------------
+# Password-reset tokens (in-memory, cleared on server restart — fine for demo)
+# ---------------------------------------------------------------------------
+_reset_tokens: dict[str, tuple[str, str]] = {}  # email -> (token, new_password)
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordConfirmRequest(BaseModel):
+    email: str
+    token: str
+    new_passkey: str
+
+
+@app.post("/api/v1/auth/reset-password/request")
+@limiter.limit("5/minute")
+def request_password_reset(
+    request: Request,
+    req: ResetPasswordRequest,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, bool]:
+    """Issue a one-time reset token for the given email."""
+    if not req.email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email required")
+    user = session.exec(select(User).where(User.email == req.email.lower())).first()
+    if not user:
+        # Return success anyway to prevent email enumeration.
+        return {"success": True}
+    token = secrets.token_urlsafe(32)
+    _reset_tokens[req.email.lower()] = (token, "")
+    # In production, send an email here with the token.
+    return {"success": True}
+
+
+@app.post("/api/v1/auth/reset-password/confirm")
+@limiter.limit("5/minute")
+def confirm_password_reset(
+    request: Request,
+    req: ResetPasswordConfirmRequest,
+    session: Annotated[Session, Depends(get_session)],
+) -> dict[str, bool]:
+    """Swap a one-time reset token for a new passkey."""
+    if not req.email or not req.token or not req.new_passkey:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="All fields required")
+    stored = _reset_tokens.get(req.email.lower())
+    if not stored or stored[0] != req.token:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid or expired token")
+    user = session.exec(select(User).where(User.email == req.email.lower())).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    hashed = hash_passkey(req.new_passkey)
+    user.hashed_passkey = hashed
+    session.add(user)
+    session.commit()
+    del _reset_tokens[req.email.lower()]
+    return {"success": True}
 
 
 @app.post("/api/v1/auth/login")

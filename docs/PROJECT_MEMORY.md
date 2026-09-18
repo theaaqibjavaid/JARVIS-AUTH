@@ -9,7 +9,7 @@
 ## Core Architectural Decisions (Non-Negotiable)
 1. **Adapter Pattern (Strategy) for Pluggable Auth**
    - All auth backends implement the `AuthAdapter` interface contract
-   - Three adapters ship out of the box: `MockAuthAdapter` (default/demo), `BackendAuthAdapter` (FastAPI), `FirebaseAuthAdapter` (placeholder/skeleton)
+   - Three adapters ship out of the box: `MockAuthAdapter` (default/demo), `BackendAuthAdapter` (FastAPI)
    - Consumers swap adapters via env var or props — **UI never changes**
    - Storage key: `jarvis_auth_user` for localStorage persistence
 2. **Next.js App Router — page.tsx is the drop-in shell**
@@ -44,10 +44,11 @@ jarvis-security-suite/            ← project root (package.json here)
 │   │       └── FingerprintPad.tsx    (press-hold conic progress)
 │   ├── context/AuthContext.tsx       (AuthProvider + useAuth())
 │   ├── lib/
-│   │   ├── auth-adapter.ts           (Mock / Backend / Firebase classes)
+│   ├── lib/
+│   │   ├── auth-adapter.ts           (Mock / Backend classes)
 │   │   └── sound-engine.ts           (Web Audio synth)
 │   ├── types/index.ts                (All shared TS interfaces, AuthAdapter contract)
-│   ├── python-backend/               (Hardened FastAPI backend — bcrypt, JWT, rate limiting, 18 pytest tests)
+│   ├── python-backend/               (Hardened FastAPI backend — bcrypt, JWT, rate limiting, 25 pytest tests)
 │   ├── globals.css
 │   ├── layout.tsx
 │   └── page.tsx
@@ -69,21 +70,21 @@ jarvis-security-suite/            ← project root (package.json here)
 - ❌ Never introduce new features into legacy sensors domain → all new sensor logic in `weather_station`
 
 ## Adapter Environment
-`NEXT_PUBLIC_AUTH_ADAPTER` ∈ {`mock` (default), `backend`, `firebase`}
+`NEXT_PUBLIC_AUTH_ADAPTER` ∈ {`mock` (default), `backend`}
 `NEXT_PUBLIC_AUTH_API_URL` (backend only, default http://localhost:8000)
 
-## Build Verification (v2.0.0, 2026-08-26)
+## Build Verification (v2.0.1, 2026-09-18)
 - `npm run typecheck` → PASS
-- `npm run test:run` → 119/119 PASS (7 suites)
+- `npm run test:run` → 132/132 PASS (7 suites)
 - `npm run build` → PASS
 - `npm run build:sdk` → PASS (ESM + CJS + DTS)
-- Backend `pytest test_main.py` → 18/18 PASS
-- Published: `@jarvis-security/sdk@2.0.0` on npm
+- Backend `pytest test_main.py` → 25/25 PASS
+- Published: `@jarvis-security/sdk@2.0.1` on npm
 
 ## Upcoming / Backlog
 1. ~~**Voiceprint Engine**~~ — ✅ DONE in v2.0.0 (`app/lib/voiceprint.ts`, real MFCC DSP)
-2. Write Vitest unit tests for `MockAuthAdapter` + `SoundEngine` + `AuthContext` reducer
-3. Production-harden `BackendAuthAdapter` with refresh token rotation, CSRF, rate-limit headers
+2. ~~Write Vitest unit tests for `MockAuthAdapter` + `SoundEngine` + `AuthContext` reducer~~ — ✅ DONE (132 tests, 7 suites)
+3. Production-harden `BackendAuthAdapter` with refresh token rotation, CSRF, rate-limit headers — ✅ DONE in v2.0.1 (CSRF/Origin middleware, security headers)
 4. ~~Implement real WebAuthn passkey registration/assertion in enrollBiometrics (`@simplewebauthn/browser` already installed)~~ — ✅ DONE in v2.0.0 (`app/lib/webauthn-biometrics.ts`, platform authenticator for face/fingerprint)
 5. Add `AuthAdapter` implementations for Supabase, Auth0, Clerk as community adapters
 6. Create actual Weather Service integration (separate phase per rules)

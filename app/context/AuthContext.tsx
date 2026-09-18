@@ -43,6 +43,7 @@ export interface AuthContextValue {
   ) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  resetPasswordConfirm: (email: string, token: string, newPasskey: string) => Promise<void>;
   verifyFace: () => Promise<void>;
   verifyVoice: (audioBlob: Blob) => Promise<void>;
   verifyFingerprint: () => Promise<void>;
@@ -83,7 +84,6 @@ export function AuthProvider({
   const adapterName: AuthAdapterName = useMemo(() => {
     const n = adapter.name.toLowerCase();
     if (n.includes("backend")) return "backend";
-    if (n.includes("firebase")) return "firebase";
     return "mock";
   }, [adapter]);
 
@@ -105,6 +105,12 @@ export function AuthProvider({
   });
 
   const sound = useMemo(() => new SoundEngine(), []);
+
+  useEffect(() => {
+    return () => {
+      sound.close();
+    };
+  }, [sound]);
 
   const playBeep = useCallback(
     (freq = 800, type: OscillatorType = "sine", duration = 0.1) => {
@@ -291,6 +297,25 @@ export function AuthProvider({
     [adapter, playError, showModal]
   );
 
+  const resetPasswordConfirm = useCallback(
+    async (email: string, token: string, newPasskey: string) => {
+      const res = await adapter.resetPasswordConfirm(email, token, newPasskey);
+      if (!res.success) {
+        playError();
+        showModal(false, "RECOVERY FAILED", res.error || "");
+        return;
+      }
+      setUser(res.user ?? null);
+      setStatus("authenticated");
+      showModal(
+        true,
+        "PASSKEY RESET COMPLETE",
+        `Passkey for ${email} has been updated successfully.`
+      );
+    },
+    [adapter, playError, showModal]
+  );
+
   const verifyFace = useCallback(async () => {
     setStatus("loading");
     updateTerminal(
@@ -441,6 +466,7 @@ export function AuthProvider({
     register,
     logout,
     resetPassword,
+    resetPasswordConfirm,
     verifyFace,
     verifyVoice,
     verifyFingerprint,

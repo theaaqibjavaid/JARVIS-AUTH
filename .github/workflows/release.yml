@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    tags:
+      # Match semver release tags only (v1.2.3, v1.2.3-beta.1, etc.)
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 2.0.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write   # create GitHub Release
+  id-token: write   # npm provenance (supply-chain integrity)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need all history for changelog generation
+
+      # ── Read package version for validation ──────────────────────────────
+      - name: Read package version
+        id: pkg
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # ── Determine target version ─────────────────────────────────────────
+      - name: Resolve release version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # User-supplied version
+            VERSION="${{ inputs.version }}"
+          else
+            # Strip leading 'v' from push tag
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          fi
+          echo "resolved=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      # ── Guard: tag version must match package.json ────────────────────────
+      - name: Validate tag against package.json
+        run: |
+          EXPECTED="${{ steps.pkg.outputs.version }}"
+          ACTUAL="${{ steps.version.outputs.resolved }}"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::Tag '$ACTUAL' does not match package.json version '$EXPECTED'."
+            echo "       Update package.json version first, or run:"
+            echo "         git tag v${EXPECTED}"
+            exit 1
+          fi
+          echo "Version OK: $ACTUAL"
+
+      # ── Node.js setup ────────────────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+
+      # ── Full CI gate — fail the release if anything breaks ────────────────
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit -p tsconfig.typecheck.json
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Build SDK
+        run: npm run build:sdk
+
+      - name: Backend tests
+        run: |
+          cd app/python-backend
+          pip install -r requirements.txt
+          pytest test_main.py -v --asyncio-mode=auto
+
+      # ── Publish to npm (trusted publisher — no secret required) ────────────
+      # npm reads the OIDC token from the runner automatically when NODE_AUTH_TOKEN
+      # is not set. Requires:
+      #   1. "id-token: write" permission (declared above)
+      #   2. Trusted publisher configured in your npm account (see README)
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+
+      # ── Extract changelog entry for this version ─────────────────────────
+      - name: Extract changelog entry
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.resolved }}"
+          FILE="CHANGELOG.md"
+          SECTION=$(awk -v ver="$VERSION" '
+            /^## \[/'"$VERSION"'\]/{flag=1;next}
+            /^## \[/{flag=0}
+            flag{print}
+          ' "$FILE")
+          echo "entry<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$SECTION" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      # ── Create GitHub Release ────────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.version.outputs.resolved }}"
+          name: "v${{ steps.version.outputs.resolved }}"
+          generate_release_notes: true
+          body: |
+            ## What's new in v${{ steps.version.outputs.resolved }}
+
+            ${{ steps.changelog.outputs.entry }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

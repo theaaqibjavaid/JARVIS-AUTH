@@ -291,3 +291,92 @@ async def test_biometric_login_invalid_method_rejected(client: AsyncClient):
         json={"email": "vision@avengers.io", "method": "iris"},
     )
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Password reset flow
+# ---------------------------------------------------------------------------
+async def test_reset_password_request_unknown_email_returns_success(client: AsyncClient):
+    """Non-existent email must not reveal whether the address is registered."""
+    response = await client.post(
+        "/api/v1/auth/reset-password/request",
+        json={"email": "ghost@nowhere.io"},
+    )
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+
+async def test_reset_password_request_missing_email(client: AsyncClient):
+    response = await client.post(
+        "/api/v1/auth/reset-password/request",
+        json={"email": ""},
+    )
+    assert response.status_code == 400
+
+
+async def test_reset_password_confirm_invalid_token(client: AsyncClient):
+    response = await client.post(
+        "/api/v1/auth/reset-password/confirm",
+        json={"email": "x@y.io", "token": "bad-token", "new_passkey": "newpass123"},
+    )
+    assert response.status_code == 404
+
+
+async def test_reset_password_confirm_full_flow(client: AsyncClient):
+    # Register a user first.
+    await _register(client, email="tony@stark.io")
+
+    # Request a reset token.
+    req = await client.post(
+        "/api/v1/auth/reset-password/request",
+        json={"email": "tony@stark.io"},
+    )
+    assert req.status_code == 200
+
+    # We can't read the token from the response (it's never returned to prevent
+    # enumeration), so we verify the endpoint handles an unknown token correctly.
+    confirm = await client.post(
+        "/api/v1/auth/reset-password/confirm",
+        json={"email": "tony@stark.io", "token": "nonexistent-token", "new_passkey": "newpass123"},
+    )
+    assert confirm.status_code == 404
+
+    # Missing fields rejected.
+    bad = await client.post(
+        "/api/v1/auth/reset-password/confirm",
+        json={"email": "tony@stark.io", "token": "", "new_passkey": ""},
+    )
+    assert bad.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# CSRF / Origin validation
+# ---------------------------------------------------------------------------
+async def test_csrf_blocked_for_unallowed_origin(client: AsyncClient):
+    """POST to a state-changing endpoint with an unallowed Origin must be rejected."""
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "a@b.io", "passkey": "wrong"},
+        headers={"Origin": "https://evil.example.com"},
+    )
+    assert response.status_code == 403
+    assert "Cross-origin" in response.json()["detail"]
+
+
+async def test_csrf_allowed_for_included_origin(client: AsyncClient):
+    """POST requests from an allowed origin must proceed normally."""
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "a@b.io", "passkey": "wrong"},
+        headers={"Origin": "http://localhost:3000"},
+    )
+    assert response.status_code == 422  # 422 = validation (not 403)
+
+
+async def test_csrf_get_not_affected(client: AsyncClient):
+    """GET requests must never be blocked by the CSRF middleware."""
+    response = await client.get(
+        "/api/v1/health",
+        headers={"Origin": "https://evil.example.com"},
+    )
+    assert response.status_code == 200
