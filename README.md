@@ -4,7 +4,7 @@
 
 **Production-grade pluggable multi-biometric authentication for React / Next.js applications**
 
-<a href="https://github.com/theaaqibjavaid/jarvis-security-suite/actions"><img src="https://github.com/theaaqibjavaid/jarvis-security-suite/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+[![CI](https://github.com/theaaqibjavaid/JARVIS-AUTH/actions/workflows/ci.yml/badge.svg)](https://github.com/theaaqibjavaid/JARVIS-AUTH/actions)
 [![Tests](https://img.shields.io/badge/tests-155%20passed-brightgreen)](#-testing)
 [![npm](https://img.shields.io/npm/v/@jarvis-security/sdk?label=%40jarvis-security%2Fsdk)](https://www.npmjs.com/package/@jarvis-security/sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-cyan.svg)](./LICENSE)
