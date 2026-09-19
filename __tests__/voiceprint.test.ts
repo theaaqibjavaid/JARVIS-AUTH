@@ -169,65 +169,65 @@ describe("voiceprint comparison", () => {
 describe("VoiceprintStore", () => {
   let store: VoiceprintStore;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     window.localStorage.clear();
     store = new VoiceprintStore();
   });
 
-  it("enroll + get + has round-trip", () => {
+  it("enroll + get + has round-trip", async () => {
     const vp = new Float32Array([1, 2, 3, 4]);
-    store.enroll("Operative@Example.io", vp);
-    expect(store.has("operative@example.io")).toBe(true);
-    const entry = store.get("operative@example.io");
+    await store.enroll("Operative@Example.io", vp);
+    expect(await store.has("operative@example.io")).toBe(true);
+    const entry = await store.get("operative@example.io");
     expect(entry).not.toBeNull();
     expect(entry?.email).toBe("operative@example.io");
     expect(entry?.voiceprint).toEqual([1, 2, 3, 4]);
   });
 
-  it("has returns false for unknown email", () => {
-    expect(store.has("nobody@example.io")).toBe(false);
-    expect(store.get("nobody@example.io")).toBeNull();
+  it("has returns false for unknown email", async () => {
+    expect(await store.has("nobody@example.io")).toBe(false);
+    expect(await store.get("nobody@example.io")).toBeNull();
   });
 
-  it("getAll lists every enrolled voiceprint", () => {
-    store.enroll("a@example.io", new Float32Array([1]));
-    store.enroll("b@example.io", new Float32Array([2]));
-    expect(store.getAll().length).toBe(2);
+  it("getAll lists every enrolled voiceprint", async () => {
+    await store.enroll("a@example.io", new Float32Array([1]));
+    await store.enroll("b@example.io", new Float32Array([2]));
+    expect((await store.getAll()).length).toBe(2);
   });
 
-  it("remove deletes a single entry, clear wipes all", () => {
-    store.enroll("a@example.io", new Float32Array([1]));
-    store.enroll("b@example.io", new Float32Array([2]));
-    store.remove("a@example.io");
-    expect(store.has("a@example.io")).toBe(false);
-    expect(store.has("b@example.io")).toBe(true);
-    store.clear();
-    expect(store.getAll().length).toBe(0);
+  it("remove deletes a single entry, clear wipes all", async () => {
+    await store.enroll("a@example.io", new Float32Array([1]));
+    await store.enroll("b@example.io", new Float32Array([2]));
+    await store.remove("a@example.io");
+    expect(await store.has("a@example.io")).toBe(false);
+    expect(await store.has("b@example.io")).toBe(true);
+    await store.clear();
+    expect((await store.getAll()).length).toBe(0);
   });
 
-  it("matchBest returns the enrolled match above threshold", () => {
+  it("matchBest returns the enrolled match above threshold", async () => {
     const vp = new Float32Array([1, 2, 3, 4, 5, 6]);
-    store.enroll("match@example.io", vp);
-    const result = store.matchBest(vp);
+    await store.enroll("match@example.io", vp);
+    const result = await store.matchBest(vp);
     expect(result).not.toBeNull();
     expect(result?.email).toBe("match@example.io");
     expect(result?.score).toBeGreaterThanOrEqual(VOICE_MATCH_THRESHOLD);
   });
 
-  it("matchBest returns null when nothing meets the threshold", () => {
+  it("matchBest returns null when nothing meets the threshold", async () => {
     const vp = new Float32Array([1, 2, 3, 4, 5, 6]);
-    store.enroll("match@example.io", vp);
+    await store.enroll("match@example.io", vp);
     // Opposite vector -> similarity 0, well below threshold.
     const opposite = new Float32Array([-1, -2, -3, -4, -5, -6]);
-    expect(store.matchBest(opposite)).toBeNull();
+    expect(await store.matchBest(opposite)).toBeNull();
   });
 
-  it("matchBest picks the highest scoring entry", () => {
+  it("matchBest picks the highest scoring entry", async () => {
     const target = new Float32Array([1, 1, 1, 1]);
     // Similar-but-not-identical vector: still above threshold, but scores < 1.
-    store.enroll("low@example.io", new Float32Array([1, 1, 1, 2]));
-    store.enroll("high@example.io", target);
-    const result = store.matchBest(target);
+    await store.enroll("low@example.io", new Float32Array([1, 1, 1, 2]));
+    await store.enroll("high@example.io", target);
+    const result = await store.matchBest(target);
     expect(result?.email).toBe("high@example.io");
     expect(result?.score).toBeCloseTo(1);
   });

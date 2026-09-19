@@ -96,19 +96,16 @@ jobs:
       - name: Publish to npm
         run: npm publish --provenance --access public
 
-      # ── Extract changelog entry for this version ─────────────────────────
-      - name: Extract changelog entry
-        id: changelog
+      # ── Read full release notes ──────────────────────────────────────────
+      - name: Read release notes
+        id: notes
         run: |
-          VERSION="${{ steps.version.outputs.resolved }}"
-          FILE="CHANGELOG.md"
-          SECTION=$(awk -v ver="$VERSION" '
-            /^## \[/'"$VERSION"'\]/{flag=1;next}
-            /^## \[/{flag=0}
-            flag{print}
-          ' "$FILE")
-          echo "entry<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$SECTION" >> "$GITHUB_OUTPUT"
+          # Change "RELEASE_NOTES.md" if your file has a different name
+          FILE="RELEASE_NOTES.md" 
+          
+          # Read the entire file into the GitHub Output
+          echo "content<<EOF" >> "$GITHUB_OUTPUT"
+          cat "$FILE" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       # ── Create GitHub Release ────────────────────────────────────────────
@@ -117,10 +114,11 @@ jobs:
         with:
           tag_name: "v${{ steps.version.outputs.resolved }}"
           name: "v${{ steps.version.outputs.resolved }}"
-          generate_release_notes: true
+          generate_release_notes: false
           body: |
-            ## What's new in v${{ steps.version.outputs.resolved }}
-
-            ${{ steps.changelog.outputs.entry }}
+            ${{ steps.notes.outputs.content }}
+            
+            ---
+            *Full history:* [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

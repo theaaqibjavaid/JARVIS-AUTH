@@ -19,8 +19,8 @@ export interface AuthResult {
   user?: UserProfile;
   error?: string;
   errorCode?: string;
-  /** Debug token issued by mock adapter's resetPassword for use with resetPasswordConfirm. */
-  _debugToken?: string;
+  /** Generated reset token (mock adapter only; real adapters deliver via email). */
+  resetToken?: string;
 }
 
 export interface AuthAdapter {

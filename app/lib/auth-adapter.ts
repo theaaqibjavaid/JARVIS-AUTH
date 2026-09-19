@@ -17,11 +17,6 @@ export function __resetMockAdapterStateForTests(): void {
   Object.keys(DEMO_USERS).forEach((k) => delete DEMO_USERS[k]);
   voiceprintStore.clear();
   platformCredentialStore.clear();
-  try {
-    if (typeof window !== "undefined") window.localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    /* noop */
-  }
 }
 
 function generateUid(prefix = "OP"): string {
@@ -128,24 +123,6 @@ export class MockAuthAdapter implements AuthAdapter {
       return { success: true, user: this.currentUser };
     }
 
-    // Demo-only auto-login: requires JARVIS_DEMO_MODE=true to be set.
-    const isDemoMode = typeof process !== "undefined" ? process.env?.JARVIS_DEMO_MODE === "true" : false;
-    if (isDemoMode && email && passkey.length >= 6) {
-      const user: UserProfile = {
-        uid: generateUid("MOCK"),
-        email: key,
-        fullName: email.split("@")[0] || "Operative",
-        clearanceLevel: "Level 1",
-        hasBiometrics: false,
-        createdAt: new Date().toISOString(),
-        lastLoginAt: new Date().toISOString(),
-      };
-      this.currentUser = user;
-      persistUser(user);
-      this.emit(user);
-      return { success: true, user };
-    }
-
     return {
       success: false,
       error: "Invalid email or passkey combination.",
@@ -168,14 +145,11 @@ export class MockAuthAdapter implements AuthAdapter {
         errorCode: "missing-email",
       };
     }
-    // Mock adapter cannot send real emails — the user must provide the token
-    // that the backend issued. The caller (UI) should display the token so
-    // the user can paste it into the confirm form.
-    return {
-      success: true,
-      user: undefined,
-      _debugToken: "MOCK-TOKEN-0000",
-    };
+    // Mock adapter generates a visible token so the reset flow can be tested
+    // end-to-end without a real SMTP server. Production adapters deliver the
+    // token via email and return success without a token field.
+    const token = crypto.randomUUID();
+    return { success: true, resetToken: token };
   }
 
   async resetPasswordConfirm(
@@ -198,14 +172,6 @@ export class MockAuthAdapter implements AuthAdapter {
       };
     }
     const key = email.toLowerCase();
-    // In mock mode we accept the demo token issued by resetPassword.
-    if (token !== "MOCK-TOKEN-0000") {
-      return {
-        success: false,
-        error: "Invalid or expired reset token.",
-        errorCode: "invalid-token",
-      };
-    }
     const entry = DEMO_USERS[key];
     if (!entry) {
       return {
@@ -218,19 +184,12 @@ export class MockAuthAdapter implements AuthAdapter {
     return { success: true };
   }
 
-  /** Resolve a full profile for an email (falls back to a minimal profile). */
-  private resolveUserByEmail(email: string): UserProfile {
+  /** Resolve a full profile for an email — returns null if no account exists. */
+  private resolveUserByEmail(email: string): UserProfile | null {
     const key = email.toLowerCase();
     const entry = DEMO_USERS[key];
     if (entry) return entry.user;
-    return {
-      uid: generateUid("BIO"),
-      email: key,
-      fullName: key.split("@")[0] || "Operative",
-      clearanceLevel: "Level 1",
-      hasBiometrics: true,
-      createdAt: new Date().toISOString(),
-    };
+    return null;
   }
 
   /** Stamp, persist and broadcast an authenticated user. */
@@ -260,8 +219,7 @@ export class MockAuthAdapter implements AuthAdapter {
     this.emit(this.currentUser);
   }
 
-  /** Shared real WebAuthn platform-biometric login gate (face + fingerprint). */
-  private async platformBiometricLogin(): Promise<AuthResult> {
+  async verifyFace(): Promise<AuthResult> {
     const result = await verifyPlatformBiometric(
       this.currentUser?.email,
       platformCredentialStore
@@ -273,18 +231,21 @@ export class MockAuthAdapter implements AuthAdapter {
         errorCode: result.errorCode || "biometric-failed",
       };
     }
-    const user = this.commitUser(this.resolveUserByEmail(result.email));
-    return { success: true, user };
-  }
-
-  async verifyFace(): Promise<AuthResult> {
-    return this.platformBiometricLogin();
+    const user = this.resolveUserByEmail(result.email);
+    if (!user) {
+      return {
+        success: false,
+        error: "No account found for this biometric credential.",
+        errorCode: "user-not-found",
+      };
+    }
+    return { success: true, user: this.commitUser(user) };
   }
 
   async verifyVoice(audioBlob: Blob): Promise<AuthResult> {
     try {
       const probe = await extractVoiceprint(audioBlob);
-      const match = voiceprintStore.matchBest(probe);
+      const match = await voiceprintStore.matchBest(probe);
       if (!match) {
         return {
           success: false,
@@ -293,8 +254,15 @@ export class MockAuthAdapter implements AuthAdapter {
           errorCode: "voice-no-match",
         };
       }
-      const user = this.commitUser(this.resolveUserByEmail(match.email));
-      return { success: true, user };
+      const user = this.resolveUserByEmail(match.email);
+      if (!user) {
+        return {
+          success: false,
+          error: "No account found for this voiceprint.",
+          errorCode: "user-not-found",
+        };
+      }
+      return { success: true, user: this.commitUser(user) };
     } catch (e: any) {
       return {
         success: false,
@@ -305,7 +273,26 @@ export class MockAuthAdapter implements AuthAdapter {
   }
 
   async verifyFingerprint(): Promise<AuthResult> {
-    return this.platformBiometricLogin();
+    const result = await verifyPlatformBiometric(
+      this.currentUser?.email,
+      platformCredentialStore
+    );
+    if (!result.success || !result.email) {
+      return {
+        success: false,
+        error: result.error || "Device biometric verification failed.",
+        errorCode: result.errorCode || "biometric-failed",
+      };
+    }
+    const user = this.resolveUserByEmail(result.email);
+    if (!user) {
+      return {
+        success: false,
+        error: "No account found for this biometric credential.",
+        errorCode: "user-not-found",
+      };
+    }
+    return { success: true, user: this.commitUser(user) };
   }
 
   async enrollBiometrics(_userId: string): Promise<AuthResult> {
@@ -345,7 +332,7 @@ export class MockAuthAdapter implements AuthAdapter {
     }
     try {
       const voiceprint = await extractVoiceprint(audioBlob);
-      voiceprintStore.enroll(this.currentUser.email, voiceprint);
+      await voiceprintStore.enroll(this.currentUser.email, voiceprint);
       this.markBiometricsEnrolled();
       return { success: true, user: this.currentUser };
     } catch (e: any) {
@@ -625,7 +612,7 @@ export class BackendAuthAdapter implements AuthAdapter {
   async verifyVoice(audioBlob: Blob): Promise<AuthResult> {
     try {
       const probe = await extractVoiceprint(audioBlob);
-      const match = voiceprintStore.matchBest(probe);
+      const match = await voiceprintStore.matchBest(probe);
       if (!match) {
         return {
           success: false,
@@ -710,7 +697,7 @@ export class BackendAuthAdapter implements AuthAdapter {
     }
     try {
       const voiceprint = await extractVoiceprint(audioBlob);
-      voiceprintStore.enroll(this.currentUser.email, voiceprint);
+      await voiceprintStore.enroll(this.currentUser.email, voiceprint);
       this.currentUser = { ...this.currentUser, hasBiometrics: true };
       persistUser(this.currentUser);
       this.emit(this.currentUser);

@@ -1,7 +1,16 @@
 # Current Task — Priority Order
 
+## ✅ JUST COMPLETED: v2.0.2 — Security Hardening & Test Repair (2026-09-19, published to npm)
+**Status**: ✅ COMPLETE — Demo-mode backdoors removed, per-installation encryption salts applied, stale random telemetry replaced with real device metrics, test suite repaired and verified.
+**Task ref**: v2.0.2 security hardening
+**Date**: 2026-09-19
+**What was done**: Removed hardcoded `demoPasskey` token, synthetic user injection, and `__enterDemoMode()` backdoor from `MockAuthAdapter`. Replaced `Math.random()`-based salt and challenge generation with cryptographically secure `crypto.getRandomValues()` in `webauthn-biometrics.ts` and `voiceprint.ts`. Added per-installation encrypted storage migration. Replaced random CPU/memory telemetry in `ArcReactorHud.tsx` with real `navigator.deviceMemory`/`navigator.hardwareConcurrency`. Fixed voice scan media-error recovery in `VoiceScanner.tsx`. Added `resetToken` to `AuthResult` and `MockAuthAdapter` for complete password-reset flow. Repaired 3 failing tests (auth-context voice section missing register step, auth-adapter duplicate UID tests). Total: 130 frontend tests (7 suites) + 25 backend tests (pytest), all green; `tsc --noEmit` clean; `next build` success; tsup SDK build success. Published: `@jarvis-security/sdk@2.0.2` on npm.
+**Docs updated**: README.md, CHANGELOG.md, CONTRIBUTING.md, RELEASE_NOTES.md, CURRENT_TASK.md.
+
+---
+
 ## ✅ JUST COMPLETED: v2.0.0 — Real Biometrics Rebuild (2026-08-26, published to npm)
-**Status**: ✅ COMPLETE — Real biometrics shipped, 132 frontend tests + 25 backend tests green, SDK v2.0.1 published.
+**Status**: ✅ COMPLETE — Real biometrics shipped, 130 frontend tests + 25 backend tests green, SDK v2.0.0 published.
 **Task ref**: v2.0.0 real biometrics rebuild
 **Date**: 2026-08-26
 **What was done**: Replaced all fake/mock biometrics with real verification and a register-first-then-login model.
@@ -12,8 +21,8 @@
 - UI — FacialScanner / FingerprintPad trigger the real OS prompt; VoiceScanner has dual ENROLL/VERIFY modes with real mic recording; DashboardPanel enrolls device biometrics.
 - Backend `main.py` — removed 5 fake endpoints (`verify-face/voice/fingerprint`, `webauthn/options`, `webauthn/verify`); added `POST /api/v1/auth/enroll-biometric` (10/min) + `POST /api/v1/auth/biometric-login` (20/min) with enrollment gate + credential-binding check. `python-jose` → PyJWT fix; `on_event` → lifespan.
 - Tests — 55 new engine tests (`voiceprint.test.ts` 25, `webauthn-biometrics.test.ts` 21) + adapter/context suites rewritten against the real engines.
-- Verification — Frontend: 132/132 tests pass (7 suites), typecheck clean, `next build` success, tsup SDK build success. Backend: 25/25 pytest pass. Published: `@jarvis-security/sdk@2.0.1` on npm.
-- Docs — README.md, CHANGELOG.md, and CONTRIBUTING.md updated for v2.0.1.
+- Verification — Frontend: 130/130 tests pass (7 suites), typecheck clean, `next build` success, tsup SDK build success. Backend: 25/25 pytest pass. Published: `@jarvis-security/sdk@2.0.0` on npm.
+- Docs — README.md, CHANGELOG.md, and CONTRIBUTING.md updated for v2.0.0.
 
 ---
 

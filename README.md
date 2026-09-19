@@ -5,7 +5,7 @@
 **Production-grade pluggable multi-biometric authentication for React / Next.js applications**
 
 <a href="https://github.com/theaaqibjavaid/jarvis-security-suite/actions"><img src="https://github.com/theaaqibjavaid/jarvis-security-suite/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-[![Tests](https://img.shields.io/badge/tests-157%20passed-brightgreen)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-155%20passed-brightgreen)](#-testing)
 [![npm](https://img.shields.io/npm/v/@jarvis-security/sdk?label=%40jarvis-security%2Fsdk)](https://www.npmjs.com/package/@jarvis-security/sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-cyan.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)](./tsconfig.json)
@@ -34,7 +34,7 @@
 | 🏠 **Persistence** | Session survives reload via `localStorage` (`jarvis_auth_user`) + `onAuthStateChanged` observable subscription pattern |
 | ♿ **Accessibility** | `aria-*` labels, `htmlFor`/`id` bindings, keyboard support (Space/Enter), `prefers-reduced-motion` support |
 | 📱 **Responsive** | 12-col Tailwind grid collapses gracefully on tablet + mobile |
-| ✅ **Fully Tested** | 132 frontend unit tests (Vitest + Testing Library) + 25 backend tests (pytest) |
+| ✅ **Fully Tested** | 130 frontend unit tests (Vitest + Testing Library) + 25 backend tests (pytest) |
 | 🔧 **Zero config demo** | `npm run dev` → works out of the box with `MockAuthAdapter` (no backends needed) |
 
 ---
@@ -185,7 +185,7 @@ The [`release.yml`](./.github/workflows/release.yml) workflow then:
 | Version guard | Compares the tag against `package.json`; aborts if they don't match |
 | Typecheck | `npx tsc --noEmit -p tsconfig.typecheck.json` |
 | Lint | `npm run lint` |
-| Frontend tests | `npm test` (132 tests) |
+| Frontend tests | `npm test` (130 tests) |
 | Build SDK | `npm run build:sdk` |
 | Backend tests | `pytest test_main.py` (25 tests) |
 | Publish | `npm publish --provenance --access public` |
@@ -344,10 +344,10 @@ uvicorn main:app --reload --port 8000
 
 ## 🧪 Testing
 
-### Frontend — 132 tests
+### Frontend — 130 tests
 
 ```bash
-npm test          # single run
+npm test          # single run (155 tests)
 npm run test:watch  # watch mode
 npm run test:coverage  # with coverage report
 ```
@@ -405,7 +405,7 @@ jarvis-security-suite/              ← npm project root
 │   ├── globals.css                     fonts + cyber-* classes + scanlines + keyframes
 │   ├── layout.tsx                      Next.js root HTML shell + metadata
 │   └── page.tsx                        HOME = AuthProvider + Canvas + AuthPortal
-├── __tests__/                          Vitest test suites (132 tests, 7 suites)
+├── __tests__/                          Vitest test suites (130 tests, 7 suites)
 ├── .github/workflows/ci.yml            CI: typecheck · lint · test-frontend · test-backend · build-sdk
 ├── docs/                               Task tracking & session history
 ├── .env.example                        Complete env var reference (frontend + backend)
@@ -413,7 +413,7 @@ jarvis-security-suite/              ← npm project root
 ├── vitest.config.ts                    test runner config
 ├── vitest.setup.ts                     test globals + audio mocks
 ├── tailwind.config.ts                  colors · fonts · shadows · keyframes · anims
-└── package.json                        @jarvis-security/sdk v2.0.1
+└── package.json                        @jarvis-security/sdk v2.0.2
 ```
 
 ---

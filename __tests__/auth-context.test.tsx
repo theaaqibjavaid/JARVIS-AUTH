@@ -102,6 +102,11 @@ describe("AuthContext (useAuth hook)", () => {
 
   it("login with valid demo credentials transitions to authenticated", async () => {
     const { result } = renderHook(() => useAuth(), { wrapper });
+    // Register first — mock adapter no longer auto-creates phantom users
+    await act(async () => {
+      await result.current.register("user@example.com", "password1", "Test User");
+    });
+    act(() => result.current.closeModal());
     await act(async () => {
       await result.current.login("user@example.com", "password1");
     });
@@ -150,6 +155,11 @@ describe("AuthContext (useAuth hook)", () => {
 
   it("logout resets user to null", async () => {
     const { result } = renderHook(() => useAuth(), { wrapper });
+    // Register first — no more synthetic user auto-creation
+    await act(async () => {
+      await result.current.register("a@b.co", "password1", "Logout Test");
+    });
+    act(() => result.current.closeModal());
     await act(async () => {
       await result.current.login("a@b.co", "password1");
     });
@@ -214,6 +224,11 @@ describe("AuthContext (useAuth hook)", () => {
     expect(result.current.modal.isSuccess).toBe(false);
     expect(mockedEnrollPlatform).not.toHaveBeenCalled();
     act(() => result.current.closeModal());
+    // Register first — mock adapter no longer auto-creates phantom users
+    await act(async () => {
+      await result.current.register("e@e.ee", "password1", "Enroll Test");
+    });
+    act(() => result.current.closeModal());
     await act(async () => {
       await result.current.login("e@e.ee", "password1");
     });
@@ -270,6 +285,11 @@ describe("AuthContext (useAuth hook)", () => {
       credentialId: "cred-face",
     });
     const { result } = renderHook(() => useAuth(), { wrapper });
+    // Register first — biometric login requires an existing account
+    await act(async () => {
+      await result.current.register("face@ctx.io", "facepass1", "Face Test");
+    });
+    act(() => result.current.closeModal());
     act(() => result.current.closeModal());
     await act(async () => {
       await result.current.verifyFace();
@@ -283,6 +303,10 @@ describe("AuthContext (useAuth hook)", () => {
 
     // Voice: register first, then login
     mockedExtractVoiceprint.mockResolvedValue(fixedVoiceprint());
+    await act(async () => {
+      await result.current.register("voice@ctx.io", "password1", "Voice Test");
+    });
+    act(() => result.current.closeModal());
     await act(async () => {
       await result.current.login("voice@ctx.io", "password1");
     });
@@ -311,6 +335,11 @@ describe("AuthContext (useAuth hook)", () => {
       email: "fp@ctx.io",
       credentialId: "cred-fp",
     });
+    // Register first — biometric login requires an existing account
+    await act(async () => {
+      await result.current.register("fp@ctx.io", "fppass1", "FP Test");
+    });
+    act(() => result.current.closeModal());
     await act(async () => {
       await result.current.verifyFingerprint();
     });

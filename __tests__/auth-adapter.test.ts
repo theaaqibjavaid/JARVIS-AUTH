@@ -135,34 +135,10 @@ describe("MockAuthAdapter", () => {
       expect(res.errorCode).toBe("invalid-credential");
     });
 
-    it("allows demo login for any valid unregistered email when JARVIS_DEMO_MODE is set", async () => {
-      const orig = process.env.JARVIS_DEMO_MODE;
-      process.env.JARVIS_DEMO_MODE = "true";
-      try {
-        const res = await adapter.login("demo@test.io", "password1");
-        expect(res.success).toBe(true);
-        expect(res.user?.email).toBe("demo@test.io");
-      } finally {
-        if (orig === undefined) delete process.env.JARVIS_DEMO_MODE;
-        else process.env.JARVIS_DEMO_MODE = orig;
-      }
-    });
-
-    it("rejects unregistered users when JARVIS_DEMO_MODE is not set", async () => {
-      const orig = process.env.JARVIS_DEMO_MODE;
-      delete process.env.JARVIS_DEMO_MODE;
-      try {
-        const res = await adapter.login("demo@test.io", "password1");
-        expect(res.success).toBe(false);
-        expect(res.errorCode).toBe("invalid-credential");
-      } finally {
-        if (orig !== undefined) process.env.JARVIS_DEMO_MODE = orig;
-      }
-    });
-
-    it("rejects with missing or too-short passkey in demo path", async () => {
-      const res = await adapter.login("a@b.com", "12");
+    it("rejects unregistered users", async () => {
+      const res = await adapter.login("demo@test.io", "password1");
       expect(res.success).toBe(false);
+      expect(res.errorCode).toBe("invalid-credential");
     });
 
     it("authenticates registered user correctly", async () => {
@@ -202,6 +178,8 @@ describe("MockAuthAdapter", () => {
 
   describe("device biometrics (face / fingerprint via WebAuthn platform)", () => {
     it("verifyFace authenticates after a successful platform assertion", async () => {
+      // User must be registered before biometric login works
+      await adapter.register("face@avengers.io", "facepass1", "Face Operative");
       mockedVerifyPlatform.mockResolvedValue({
         success: true,
         email: "face@avengers.io",
@@ -210,7 +188,6 @@ describe("MockAuthAdapter", () => {
       const res = await adapter.verifyFace();
       expect(res.success).toBe(true);
       expect(res.user?.email).toBe("face@avengers.io");
-      expect(res.user?.uid).toMatch(/^BIO-/);
       expect(res.user?.hasBiometrics).toBe(true);
     });
 
@@ -227,6 +204,8 @@ describe("MockAuthAdapter", () => {
     });
 
     it("verifyFingerprint authenticates after a successful platform assertion", async () => {
+      // User must be registered before biometric login works
+      await adapter.register("fp@avengers.io", "fppass1", "FP Operative");
       mockedVerifyPlatform.mockResolvedValue({
         success: true,
         email: "fp@avengers.io",
@@ -235,7 +214,6 @@ describe("MockAuthAdapter", () => {
       const res = await adapter.verifyFingerprint();
       expect(res.success).toBe(true);
       expect(res.user?.email).toBe("fp@avengers.io");
-      expect(res.user?.uid).toMatch(/^BIO-/);
       expect(res.user?.hasBiometrics).toBe(true);
     });
   });

@@ -28,13 +28,10 @@ export function PasskeyForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [remember, setRemember] = useState(true);
   const [localError, setLocalError] = useState<string | null>(null);
 
   // Password-reset state machine
-  const [resetStep, setResetStep] = useState<
-    "idle" | "request-sent" | "confirm"
-  >("idle");
+  const [resetStep, setResetStep] = useState<"idle" | "confirm">("idle");
   const [resetToken, setResetToken] = useState("");
   const [resetNewPasskey, setResetNewPasskey] = useState("");
   const [showResetPassword, setShowResetPassword] = useState(false);
@@ -72,10 +69,17 @@ export function PasskeyForm() {
       setLocalError("Please enter your email first.");
       return;
     }
-    await resetPassword(cleanEmail);
-    // UI is updated via the modal from AuthContext; transition to confirm step
-    // only when we have a token (mock mode).
-    setResetStep("request-sent");
+    const result = await resetPassword(cleanEmail);
+    if (result.success && result.resetToken) {
+      // Mock adapter returns the token directly — pre-fill and move to confirm.
+      setResetToken(result.resetToken);
+      setResetStep("confirm");
+    } else if (result.success) {
+      // Backend adapter: token sent via email. Prompt user to enter it manually.
+      setResetStep("confirm");
+    } else {
+      setLocalError(result.error || "Failed to send reset request.");
+    }
   };
 
   const handleResetConfirm = async (e: React.MouseEvent) => {
@@ -305,17 +309,7 @@ export function PasskeyForm() {
             <span>USE DEVICE PASSKEY</span>
           </button>
 
-          <div className="flex justify-between items-center text-xs pt-1">
-            <label className="flex items-center space-x-2 cursor-pointer text-cyber-cyan/70 hover:text-cyber-cyan">
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-                className="accent-cyber-cyan bg-cyber-bg border-cyber-cyan/40 rounded"
-                disabled={loading}
-              />
-              <span>REMEMBER ID</span>
-            </label>
+          <div className="flex justify-end items-center text-xs pt-1">
             <a
               href="#"
               onClick={handleResetRequest}

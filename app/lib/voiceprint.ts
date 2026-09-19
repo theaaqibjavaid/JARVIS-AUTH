@@ -350,8 +350,99 @@ export async function extractVoiceprint(blob: Blob): Promise<Float32Array> {
   return extractVoiceprintFromPCM(signal, sampleRate);
 }
 
+/** Decode a base64url string to raw bytes. */
+function decodeBase64Url(base64url: string): Uint8Array {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = base64.length % 4 === 0 ? "" : "=".repeat(4 - base64.length % 4);
+  const binary =
+    typeof atob !== "undefined"
+      ? atob(base64 + padding)
+      : Buffer.from(base64 + padding, "base64").toString("binary");
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** Encode raw bytes to base64url. */
+function bufferToBase64Url(input: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < input.length; i++) binary += String.fromCharCode(input[i]);
+  const base64 =
+    typeof btoa !== "undefined"
+      ? btoa(binary)
+      : Buffer.from(input).toString("base64");
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 // ---------------------------------------------------------------------------
-// Persistent voiceprint store (localStorage, keyed by email)
+// Encryption: reuses the same PBKDF2 salt as the platform credential store
+// so voiceprints and credentials share one per-installation key.
+// ---------------------------------------------------------------------------
+
+const VOICEPRINT_SALT_KEY = "jarvis_encrypt_salt_v1";
+const VOICEPRINT_PBKDF2_ITERATIONS = 100_000;
+
+async function voiceprintGetSalt(): Promise<Uint8Array> {
+  if (typeof sessionStorage === "undefined") {
+    const s = new Uint8Array(32);
+    crypto.getRandomValues(s);
+    return s;
+  }
+  let raw = sessionStorage.getItem(VOICEPRINT_SALT_KEY);
+  if (!raw) {
+    const s = new Uint8Array(32);
+    crypto.getRandomValues(s);
+    raw = bufferToBase64Url(s);
+    sessionStorage.setItem(VOICEPRINT_SALT_KEY, raw);
+  }
+  return decodeBase64Url(raw);
+}
+
+async function voiceprintDeriveKey(): Promise<CryptoKey> {
+  const salt = await voiceprintGetSalt();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    new Uint8Array([0x4a, 0x52, 0x56, 0x53]),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: salt as BufferSource, iterations: VOICEPRINT_PBKDF2_ITERATIONS, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function voiceprintEncrypt(data: unknown): Promise<string> {
+  const key = await voiceprintDeriveKey();
+  const encoder = new TextEncoder();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    encoder.encode(JSON.stringify(data))
+  );
+  const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(ciphertext), iv.length);
+  return bufferToBase64Url(combined);
+}
+
+async function voiceprintDecrypt(b64: string): Promise<Record<string, StoredVoiceprint>> {
+  const key = await voiceprintDeriveKey();
+  const combined = decodeBase64Url(b64);
+  if (combined.length < 13) return {};
+  const iv = combined.slice(0, 12);
+  const ciphertext = combined.slice(12);
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+  return JSON.parse(new TextDecoder().decode(plaintext)) as Record<string, StoredVoiceprint>;
+}
+
+// ---------------------------------------------------------------------------
+// Persistent voiceprint store (localStorage, encrypted, keyed by email)
 // ---------------------------------------------------------------------------
 
 export interface StoredVoiceprint {
@@ -361,50 +452,63 @@ export interface StoredVoiceprint {
 }
 
 export class VoiceprintStore {
-  private read(): Record<string, StoredVoiceprint> {
+  private async read(): Promise<Record<string, StoredVoiceprint>> {
     if (typeof window === "undefined") return {};
     try {
       const raw = window.localStorage.getItem(VOICEPRINT_STORE_KEY);
-      return raw ? (JSON.parse(raw) as Record<string, StoredVoiceprint>) : {};
+      if (!raw) return {};
+      // Legacy plaintext data starts with '{' (JSON object)
+      if (raw.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(raw) as Record<string, StoredVoiceprint>;
+          await this.write(parsed); // Migrate to encrypted format
+          return parsed;
+        } catch {
+          return {};
+        }
+      }
+      return await voiceprintDecrypt(raw);
     } catch {
       return {};
     }
   }
 
-  private write(map: Record<string, StoredVoiceprint>): void {
+  private async write(map: Record<string, StoredVoiceprint>): Promise<void> {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(VOICEPRINT_STORE_KEY, JSON.stringify(map));
+    const encrypted = await voiceprintEncrypt(map);
+    window.localStorage.setItem(VOICEPRINT_STORE_KEY, encrypted);
   }
 
-  enroll(email: string, voiceprint: Float32Array): void {
-    const map = this.read();
+  async enroll(email: string, voiceprint: Float32Array): Promise<void> {
+    const map = await this.read();
     map[email.toLowerCase()] = {
       email: email.toLowerCase(),
       voiceprint: Array.from(voiceprint),
       enrolledAt: new Date().toISOString(),
     };
-    this.write(map);
+    await this.write(map);
   }
 
-  get(email: string): StoredVoiceprint | null {
-    return this.read()[email.toLowerCase()] ?? null;
+  async get(email: string): Promise<StoredVoiceprint | null> {
+    const map = await this.read();
+    return map[email.toLowerCase()] ?? null;
   }
 
-  has(email: string): boolean {
-    return Boolean(this.get(email));
+  async has(email: string): Promise<boolean> {
+    return Boolean(await this.get(email));
   }
 
-  getAll(): StoredVoiceprint[] {
-    return Object.values(this.read());
+  async getAll(): Promise<StoredVoiceprint[]> {
+    return Object.values(await this.read());
   }
 
-  remove(email: string): void {
-    const map = this.read();
+  async remove(email: string): Promise<void> {
+    const map = await this.read();
     delete map[email.toLowerCase()];
-    this.write(map);
+    await this.write(map);
   }
 
-  clear(): void {
+  async clear(): Promise<void> {
     if (typeof window === "undefined") return;
     window.localStorage.removeItem(VOICEPRINT_STORE_KEY);
   }
@@ -413,12 +517,12 @@ export class VoiceprintStore {
    * 1:N match — compare a probe voiceprint against every enrolled voiceprint
    * and return the best match above threshold, or null.
    */
-  matchBest(
+  async matchBest(
     probe: Float32Array,
     threshold = VOICE_MATCH_THRESHOLD
-  ): { email: string; score: number } | null {
+  ): Promise<{ email: string; score: number } | null> {
     let best: { email: string; score: number } | null = null;
-    for (const entry of this.getAll()) {
+    for (const entry of await this.getAll()) {
       const stored = new Float32Array(entry.voiceprint);
       const score = compareVoiceprints(probe, stored);
       if (score >= threshold && (!best || score > best.score)) {

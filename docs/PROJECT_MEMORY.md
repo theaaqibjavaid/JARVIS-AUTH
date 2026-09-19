@@ -73,17 +73,17 @@ jarvis-security-suite/            ← project root (package.json here)
 `NEXT_PUBLIC_AUTH_ADAPTER` ∈ {`mock` (default), `backend`}
 `NEXT_PUBLIC_AUTH_API_URL` (backend only, default http://localhost:8000)
 
-## Build Verification (v2.0.1, 2026-09-18)
+## Build Verification (v2.0.2, 2026-09-19)
 - `npm run typecheck` → PASS
-- `npm run test:run` → 132/132 PASS (7 suites)
+- `npm test` → 130/130 PASS (7 suites)
 - `npm run build` → PASS
 - `npm run build:sdk` → PASS (ESM + CJS + DTS)
 - Backend `pytest test_main.py` → 25/25 PASS
-- Published: `@jarvis-security/sdk@2.0.1` on npm
+- Published: `@jarvis-security/sdk@2.0.2` on npm
 
 ## Upcoming / Backlog
 1. ~~**Voiceprint Engine**~~ — ✅ DONE in v2.0.0 (`app/lib/voiceprint.ts`, real MFCC DSP)
-2. ~~Write Vitest unit tests for `MockAuthAdapter` + `SoundEngine` + `AuthContext` reducer~~ — ✅ DONE (132 tests, 7 suites)
+2. ~~Write Vitest unit tests for `MockAuthAdapter` + `SoundEngine` + `AuthContext` reducer~~ — ✅ DONE (130 tests, 7 suites)
 3. Production-harden `BackendAuthAdapter` with refresh token rotation, CSRF, rate-limit headers — ✅ DONE in v2.0.1 (CSRF/Origin middleware, security headers)
 4. ~~Implement real WebAuthn passkey registration/assertion in enrollBiometrics (`@simplewebauthn/browser` already installed)~~ — ✅ DONE in v2.0.0 (`app/lib/webauthn-biometrics.ts`, platform authenticator for face/fingerprint)
 5. Add `AuthAdapter` implementations for Supabase, Auth0, Clerk as community adapters

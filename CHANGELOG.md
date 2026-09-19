@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.2] - 2026-09-19
+
+Security hardening and test-repair release. Closes several demo-mode backdoors, enforces per-installation encryption salts, and eliminates stale random telemetry.
+
+### Added
+
+- **Per-installation encryption salt** — `PlatformCredentialStore` in `webauthn-biometrics.ts` now derives its AES-GCM key from a securely-random, per-installation salt persisted to localStorage; legacy plaintext data is auto-migrated on read.
+- **Secure random challenges** — `randomChallenge()` in `webauthn-biometrics.ts` uses `crypto.getRandomValues()` (via the Web Crypto API) instead of `Math.random()`.
+- **Voiceprint storage encryption** — `VoiceprintStore` in `voiceprint.ts` now encrypts enrolled voiceprints before persisting to localStorage using the same per-installation AES-GCM scheme.
+
+### Changed
+
+- **Removed demo-mode backdoors** — the hardcoded `demoPasskey` token, synthetic user injection, and `__enterDemoMode()` flag have been removed from `MockAuthAdapter` in `auth-adapter.ts`. The mock adapter now behaves like a clean local store with no privileged bypasses.
+- **ArcReactorHud telemetry** — replaced `Math.random()`-based CPU/memory values with real `navigator.deviceMemory` and `navigator.hardwareConcurrency` (with graceful fallbacks). Fake network latency values replaced with realistic fixed constants.
+- **VoiceScanner** — added a media-error recovery state so the component surfaces a clear error when the user denies microphone access instead of hanging silently. Removed the deprecated `PHRASE_POOL` constant.
+- **Test assertions** — aligned `auth-adapter.test.ts` and `auth-context.test.tsx` with the corrected adapter behavior (biometric login reuses the registered user's UID rather than minting a new one).
+
+### Fixed
+
+- **Password-reset test** — `auth-context.test.tsx` voice section now registers the user before attempting login, matching the actual register-first-then-login contract.
+- **TypeScript typecheck** — all fixes are type-safe; `tsc --noEmit` passes cleanly.
+- **Full test suite** — 130 frontend tests (7 suites) and 25 backend tests all pass.
+
+---
+
 ## [2.0.1] - 2026-09-18
 
 Production-hardening release. Fixes CSRF gaps, voice visualizer, password-reset UX, and cleans up stale references.
@@ -101,7 +126,8 @@ The "no more toy" release — every biometric method now performs **real verific
 - Full TypeScript strict-mode typing
 - Full unit/regression test suite with Vitest
 
-[Unreleased]: https://github.com/jarvis-security/jarvis-security-suite/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/jarvis-security/jarvis-security-suite/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/jarvis-security/jarvis-security-suite/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/jarvis-security/jarvis-security-suite/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/jarvis-security/jarvis-security-suite/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/jarvis-security/jarvis-security-suite/releases/tag/v1.0.0

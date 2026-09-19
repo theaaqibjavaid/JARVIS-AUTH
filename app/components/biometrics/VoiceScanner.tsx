@@ -4,18 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { Mic, ShieldAlert } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
-const PHRASE_POOL = [
-  "JARVIS ACCESS AUTHORIZATION CODE SEVEN",
-  "OMEGA PRIME VOICE AUTHENTICATED",
-  "STARK INDUSTRIES BIOMETRIC CLEARANCE",
-  "VOICE PRINT CONFIRMED PROTOCOL ALPHA",
-  "JARVIS VERIDICAL SONIC AUTHORIZATION",
-];
-
-function getRandomPhrase(): string {
-  return PHRASE_POOL[Math.floor(Math.random() * PHRASE_POOL.length)];
-}
-
 const RECORD_MS = 3000;
 const DEFAULT_HEIGHTS = [10, 14, 18, 14, 10, 7, 5];
 
@@ -39,7 +27,6 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
   const [listening, setListening] = useState(false);
   const [heights, setHeights] = useState<number[]>(DEFAULT_HEIGHTS);
   const [micError, setMicError] = useState<string | null>(null);
-  const [phrase] = useState(() => getRandomPhrase());
   const intervalRef = useRef<number | null>(null);
   const timeoutRef = useRef<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -71,14 +58,19 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
     setMicError(null);
     setListening(true);
 
-    // Acquire the microphone. If it is unavailable we abort honestly — we never
-    // fabricate an audio sample.
     let started = false;
+    let mediaErr: DOMException | null = null;
     chunksRef.current = [];
+
     if (
-      typeof navigator !== "undefined" &&
-      navigator.mediaDevices?.getUserMedia
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia
     ) {
+      mediaErr = new DOMException(
+        "This browser does not support microphone access.",
+        "NotSupportedError"
+      );
+    } else {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: { sampleRate: 16000, channelCount: 1 },
@@ -122,15 +114,22 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
           draw();
         } else {
           stream.getTracks().forEach((t) => t.stop());
+          mediaErr = new DOMException(
+            "MediaRecorder is not supported in this browser.",
+            "NotSupportedError"
+          );
         }
-      } catch {
-        /* mic denied or unavailable */
+      } catch (err) {
+        mediaErr = err instanceof DOMException ? err : new DOMException(String(err), "UnknownError");
       }
     }
 
     if (!started) {
       setListening(false);
-      setMicError("Microphone unavailable. Grant mic access and retry.");
+      const errorMessage = mediaErr
+        ? formatMediaError(mediaErr)
+        : "Microphone unavailable. Grant mic access and retry.";
+      setMicError(errorMessage);
       playError();
       return;
     }
@@ -211,7 +210,7 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
         </div>
 
         <div className="text-xs text-cyber-cyan font-mono mt-2 tracking-widest text-glow text-center">
-          PHRASE: &ldquo;{phrase}&rdquo;
+          {isEnroll ? "ENROLL MODE" : "VERIFY MODE"}
         </div>
       </div>
 
@@ -223,8 +222,8 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
       ) : (
         <p className="text-xs text-cyber-cyan/60 text-center">
           {isEnroll
-            ? "Speak the phrase to capture your voiceprint. Processed on-device."
-            : "Speak the phrase to verify your voiceprint. Processed on-device."}
+            ? "Speak clearly into the microphone. Voiceprint is processed on-device."
+            : "Speak clearly into the microphone. Voiceprint is matched on-device."}
         </p>
       )}
 
@@ -244,4 +243,22 @@ export function VoiceScanner({ mode = "verify" }: VoiceScannerProps) {
       </button>
     </div>
   );
+}
+
+/** Convert a DOMException from getUserMedia into a user-friendly message. */
+function formatMediaError(err: DOMException): string {
+  switch (err.name) {
+    case "NotAllowedError":
+      return "Microphone access was denied. Allow microphone access in your browser settings and retry.";
+    case "NotFoundError":
+      return "No microphone found. Connect a microphone and retry.";
+    case "NotReadableError":
+      return "Microphone is in use by another application. Close other apps using the mic and retry.";
+    case "SecurityError":
+      return "Microphone access is blocked by browser security policy. Ensure the page is served over HTTPS or localhost.";
+    case "TypeError":
+      return "Invalid microphone configuration. Please retry.";
+    default:
+      return `Microphone error (${err.name}): ${err.message}. Grant mic access and retry.`;
+  }
 }

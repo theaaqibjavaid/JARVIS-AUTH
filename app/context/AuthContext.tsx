@@ -42,7 +42,7 @@ export interface AuthContextValue {
     fullName: string
   ) => Promise<void>;
   logout: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<AuthResult>;
   resetPasswordConfirm: (email: string, token: string, newPasskey: string) => Promise<void>;
   verifyFace: () => Promise<void>;
   verifyVoice: (audioBlob: Blob) => Promise<void>;
@@ -286,13 +286,23 @@ export function AuthProvider({
       if (!res.success) {
         playError();
         showModal(false, "RECOVERY ERROR", res.error || "");
-        return;
+        return res;
       }
-      showModal(
-        true,
-        "RECOVERY DISPATCHED",
-        `Passkey reset instructions sent to ${email}.`
-      );
+      if (res.resetToken) {
+        // Mock adapter surfaces the token directly; show it in a modal.
+        showModal(
+          true,
+          "RECOVERY DISPATCHED",
+          `Reset token for ${email}:\n\n${res.resetToken}\n\nPaste this token into the form below.`
+        );
+      } else {
+        showModal(
+          true,
+          "RECOVERY DISPATCHED",
+          `Passkey reset instructions sent to ${email}. Check your email for the token.`
+        );
+      }
+      return res;
     },
     [adapter, playError, showModal]
   );

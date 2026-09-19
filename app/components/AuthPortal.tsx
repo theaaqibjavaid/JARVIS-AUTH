@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import type { BiometricMethod } from "../types";
-import { PlatformCredentialStore } from "../lib/webauthn-biometrics";
+import { PlatformCredentialStore, isPlatformBiometricSupported } from "../lib/webauthn-biometrics";
 import { VoiceprintStore } from "../lib/voiceprint";
 import { ArcReactorHud } from "./ArcReactorHud";
 import { PasskeyForm } from "./biometrics/PasskeyForm";
@@ -101,6 +101,7 @@ function BiometricTabs() {
     label: string;
   }[] = [
     { id: "retina", icon: <Eye className="w-5 h-5 mb-1" />, label: "FACIAL/EYE" },
+    { id: "fingerprint", icon: <Fingerprint className="w-5 h-5 mb-1" />, label: "FINGERPRINT" },
     { id: "passkey", icon: <Target className="w-5 h-5 mb-1" />, label: "PASSKEY" },
     { id: "voice", icon: <Mic className="w-5 h-5 mb-1" />, label: "VOICE" },
   ];
@@ -113,7 +114,7 @@ function BiometricTabs() {
     "border-cyber-cyan/30 bg-cyber-cyan/5 hover:bg-cyber-cyan/20";
 
   return (
-    <div className="grid grid-cols-3 gap-3 mb-6">
+    <div className="grid grid-cols-4 gap-3 mb-6">
       {methods.map((m) => {
         const active = activeMethod === m.id;
         return (
@@ -326,17 +327,6 @@ function AuthPanel() {
       </div>
 
       <div className="mt-6 pt-4 border-t border-cyber-cyan/20 flex justify-between items-center text-xs">
-        <button
-          type="button"
-          onClick={() => {
-            setActiveMethod("fingerprint");
-            playBeep(700, "sine", 0.1);
-          }}
-          className="text-cyber-cyan/60 hover:text-cyber-cyan flex items-center gap-1"
-        >
-          <Fingerprint className="w-3.5 h-3.5" />
-          <span>FINGERPRINT SCAN</span>
-        </button>
         <span className="text-cyber-cyan/40 uppercase tracking-wider">
           PROTOCOL: {activeMethod}
         </span>
@@ -348,6 +338,11 @@ function AuthPanel() {
 export function AuthPortal() {
   const { user, audioEnabled, toggleAudio, adapterName } = useAuth();
   const [clock, setClock] = useState({ time: "13:14", date: "" });
+  const [webauthnSupported, setWebauthnSupported] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    isPlatformBiometricSupported().then(setWebauthnSupported);
+  }, []);
 
   useEffect(() => {
     const tick = () => {
@@ -390,10 +385,10 @@ export function AuthPortal() {
         <div className="flex items-center space-x-3">
           <div className="w-3 h-3 bg-cyber-cyan rounded-full animate-ping" />
           <div>
-            <h1 className="font-orbitron font-bold text-lg md:text-xl tracking-widest text-glow flex items-center gap-2">
+            <h1 className="font-orbitron font-bold text-lg md:text-xl tracking-widest text-glow">
               J.A.R.V.I.S.
-              <span className="text-xs px-2 py-0.5 rounded bg-cyber-cyan/10 border border-cyber-cyan/40 text-cyber-cyan">
-                PRODUCTION AUTH v10.5
+              <span className="text-xs px-2 py-0.5 rounded bg-cyber-cyan/10 border border-cyber-cyan/40 text-cyber-cyan ml-2">
+                SDK v{process.env.NEXT_PUBLIC_VERSION ?? "2.0.2"}
               </span>
             </h1>
             <p className="text-xs text-cyber-cyan/60 tracking-wider">
@@ -411,11 +406,9 @@ export function AuthPortal() {
           </div>
           <div className="flex items-center space-x-2">
             <span className="text-cyber-cyan/50">WEBAUTHN:</span>
-            <span className="text-cyber-cyan font-bold">READY</span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <span className="text-cyber-cyan/50">AI CORE:</span>
-            <span className="text-cyber-emerald animate-pulse">ONLINE</span>
+            <span className={webauthnSupported ? "text-cyber-emerald font-bold" : "text-cyber-red font-bold"}>
+              {webauthnSupported === null ? "CHECKING…" : webauthnSupported ? "READY" : "UNAVAILABLE"}
+            </span>
           </div>
         </div>
 

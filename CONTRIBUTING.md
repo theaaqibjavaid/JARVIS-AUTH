@@ -39,7 +39,7 @@ jarvis-security-suite/
 │   ├── components/          # React components (AuthPortal, CanvasBackground, biometrics)
 │   ├── context/             # React Context (AuthProvider, useAuth)
 │   ├── lib/                 # Core logic
-│   │   ├── auth-adapter.ts        # Strategy pattern: Mock / Backend / Firebase adapters
+│   │   ├── auth-adapter.ts        # Strategy pattern: Mock / Backend adapters
 │   │   ├── webauthn-biometrics.ts # Real WebAuthn platform authenticator engine (face/fingerprint)
 │   │   ├── voiceprint.ts          # Real MFCC DSP voiceprint engine (voice)
 │   │   ├── sound-engine.ts        # Web Audio API synth
@@ -47,7 +47,7 @@ jarvis-security-suite/
 │   ├── types/               # TypeScript interfaces and types
 │   ├── python-backend/      # FastAPI backend (bcrypt, JWT, WebAuthn)
 │   └── index.ts             # SDK barrel entry point
-├── __tests__/               # Vitest test suite (132 tests, 7 suites)
+├── __tests__/               # Vitest test suite (130 tests, 7 suites)
 ├── docs/                    # Project documentation and task logs
 ├── dist/                    # Compiled SDK output (after build)
 ├── package.json             # Package manifest, SDK build config

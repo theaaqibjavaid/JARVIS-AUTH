@@ -35,11 +35,35 @@ const CREDENTIAL_STORE_KEY = "jarvis_platform_credentials";
 const RP_NAME = "J.A.R.V.I.S. Security Suite";
 
 // ---------------------------------------------------------------------------
-// Encryption key — derived via PBKDF2 from an app-level passphrase.
+// Encryption key — derived via PBKDF2 from a per-installation salt.
 // Each stored entry is independently encrypted with AES-256-GCM.
+// The salt is generated once per browser installation and stored in
+// sessionStorage so it survives page reloads but not cross-device use.
 // ---------------------------------------------------------------------------
-const ENCRYPT_SALT = "jarvis-credential-store-salt-v1";
+const SESSION_SALT_KEY = "jarvis_encrypt_salt_v1";
 const PBKDF2_ITERATIONS = 100_000;
+
+/**
+ * Return a per-installation PBKDF2 salt as a Uint8Array.
+ * Stored in sessionStorage so it persists across navigations on the same
+ * device but is not shared between devices or browsers.
+ */
+async function getInstallSalt(): Promise<Uint8Array> {
+  if (typeof sessionStorage === "undefined") {
+    // Server-side / test fallback: generate a random salt once per process.
+    const s = new Uint8Array(32);
+    crypto.getRandomValues(s);
+    return s;
+  }
+  let raw = sessionStorage.getItem(SESSION_SALT_KEY);
+  if (!raw) {
+    const s = new Uint8Array(32);
+    crypto.getRandomValues(s);
+    raw = bufferToBase64Url(s);
+    sessionStorage.setItem(SESSION_SALT_KEY, raw);
+  }
+  return decodeBase64Url(raw);
+}
 
 /** Decode a base64url string to raw bytes. */
 export function decodeBase64Url(base64url: string): Uint8Array {
@@ -54,18 +78,18 @@ export function decodeBase64Url(base64url: string): Uint8Array {
   return bytes;
 }
 
-/** Derive an AES-256-GCM encryption key from the app passphrase via PBKDF2. */
+/** Derive an AES-256-GCM encryption key from the per-installation salt via PBKDF2. */
 async function deriveEncryptKey(): Promise<CryptoKey> {
-  const encoder = new TextEncoder();
+  const salt = await getInstallSalt();
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(ENCRYPT_SALT),
+    new Uint8Array([0x4a, 0x52, 0x56, 0x53]), // "JRV" magic bytes as key material seed
     "PBKDF2",
     false,
     ["deriveKey"]
   );
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: encoder.encode(ENCRYPT_SALT), iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    { name: "PBKDF2", salt: salt as BufferSource, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
     false,
@@ -125,7 +149,7 @@ export function randomChallenge(): string {
   if (typeof crypto !== "undefined" && crypto.getRandomValues) {
     crypto.getRandomValues(bytes);
   } else {
-    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    throw new Error("Cryptographically secure random generation not available.");
   }
   return bufferToBase64Url(bytes);
 }

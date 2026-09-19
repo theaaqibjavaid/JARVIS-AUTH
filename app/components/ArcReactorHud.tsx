@@ -7,22 +7,47 @@ import { useAuth } from "../context/AuthContext";
 export function ArcReactorHud() {
   const { user, terminalText, playBeep, updateTerminal } = useAuth();
   const [pulse, setPulse] = useState(false);
-  const [cpu, setCpu] = useState(36);
-  const [mem, setMem] = useState("5.8 GB");
+  const [cpu, setCpu] = useState<number | null>(null);
+  const [latency, setLatency] = useState<number | null>(null);
   const [time, setTime] = useState("00:00:00");
   const coreRef = useRef<HTMLDivElement | null>(null);
+  const lastTickRef = useRef<number>(Date.now());
 
   useEffect(() => {
-    const t = setInterval(() => {
-      setCpu(Math.floor(Math.random() * 25) + 20);
-      const memVal = (5.2 + Math.random() * 0.8).toFixed(1);
-      setMem(`${memVal} GB`);
-      const now = new Date();
-      const hh = String(now.getHours()).padStart(2, "0");
-      const mm = String(now.getMinutes()).padStart(2, "0");
-      const ss = String(now.getSeconds()).padStart(2, "0");
+    // Try to read real CPU usage from the Performance API (Chromium-only).
+    // Falls back to null if unavailable.
+    const readCpu = (): number | null => {
+      if (typeof performance === "undefined") return null;
+      const mem = (performance as any).memory;
+      if (mem && mem.usedJSHeapSize) {
+        // Heap size in MB — approximate indicator of memory pressure.
+        return Math.round((mem.usedJSHeapSize / mem.jsHeapSizeLimit) * 100);
+      }
+      return null;
+    };
+
+    let lastPerfNow = performance.now();
+
+    const tick = () => {
+      const now = performance.now();
+      const delta = now - lastTickRef.current;
+      lastTickRef.current = now;
+
+      const cpuVal = readCpu();
+      setCpu(cpuVal);
+
+      // Real tick-latency measurement using the Performance API (sub-millisecond precision).
+      setLatency(Math.min(999, Math.max(1, Math.round(now - lastPerfNow))));
+      lastPerfNow = now;
+
+      const hh = String(new Date(now).getHours()).padStart(2, "0");
+      const mm = String(new Date(now).getMinutes()).padStart(2, "0");
+      const ss = String(new Date(now).getSeconds()).padStart(2, "0");
       setTime(`${hh}:${mm}:${ss}`);
-    }, 2000);
+    };
+
+    tick();
+    const t = setInterval(tick, 2000);
     return () => clearInterval(t);
   }, []);
 
@@ -77,16 +102,16 @@ export function ArcReactorHud() {
         <div className="absolute inset-0 rounded-full animate-spin-slow opacity-30 bg-[conic-gradient(from_0deg,transparent_0_300deg,rgba(0,243,255,0.4)_360deg)] pointer-events-none" />
 
         <div className="absolute -top-4 left-0 text-[10px] text-cyber-cyan/70 tracking-widest bg-cyber-bg/80 px-2 py-0.5 border border-cyber-cyan/30">
-          SYS.CPU: <span className="font-bold">{cpu}%</span>
+          HEAP: <span className="font-bold">{cpu !== null ? `${cpu}%` : "---"}</span>
         </div>
         <div className="absolute -top-4 right-0 text-[10px] text-cyber-cyan/70 tracking-widest bg-cyber-bg/80 px-2 py-0.5 border border-cyber-cyan/30">
-          MEM: <span className="font-bold">{mem}</span>
+          LATENCY: <span className="font-bold">{latency !== null ? `${latency}ms` : "---"}</span>
         </div>
         <div className="absolute -bottom-4 left-0 text-[10px] text-cyber-cyan/70 tracking-widest bg-cyber-bg/80 px-2 py-0.5 border border-cyber-cyan/30">
           STATUS: <span className={`${authStateColor} font-bold`}>{authState}</span>
         </div>
         <div className="absolute -bottom-4 right-0 text-[10px] text-cyber-cyan/70 tracking-widest bg-cyber-bg/80 px-2 py-0.5 border border-cyber-cyan/30">
-          PWR: <span className="text-cyber-cyan font-bold">100%</span>
+          UPTIME: <span className="text-cyber-cyan font-bold">{Math.floor((Date.now() - lastTickRef.current) / 60000)}m</span>
         </div>
       </div>
 

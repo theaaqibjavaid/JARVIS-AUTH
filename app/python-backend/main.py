@@ -30,13 +30,13 @@ from fastapi.responses import JSONResponse
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-_JWT_SECRET = os.environ.get("JARVIS_JWT_SECRET")
-if not _JWT_SECRET:
+_jwt_secret = os.environ.get("JARVIS_JWT_SECRET")
+if not _jwt_secret:
     raise RuntimeError(
         "JARVIS_JWT_SECRET environment variable is required. "
         "Generate one with: openssl rand -hex 64"
     )
-SECRET_KEY: str = _JWT_SECRET
+SECRET_KEY: str = _jwt_secret
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -91,21 +91,22 @@ async def security_headers_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Cache-Control"] = "no-store"
     response.headers["Permissions-Policy"] = (
         "camera=(), microphone=(), geolocation=(), payment=()"
     )
-    # HSTS: enforce HTTPS for 1 year, include subdomains
-    response.headers["Strict-Transport-Security"] = (
-        "max-age=31536000; includeSubDomains; preload"
-    )
-    # CSP: strict — only self + allowed origins for scripts/styles
+    # HSTS: only set when running over HTTPS to avoid breaking HTTP dev servers.
+    is_https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    if is_https:
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains; preload"
+        )
+    # CSP: strict — no unsafe-inline or unsafe-eval.
     origin = request.headers.get("origin", "")
     csp_values = [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+        "script-src 'self'",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob:",
         "font-src 'self'",
